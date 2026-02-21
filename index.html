@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="ETF Monitor" />
+  <meta name="theme-color" content="#080c14" />
+  <title>ETF Monitor</title>
+
+  <!-- PWA 아이콘 (홈 화면 추가 시 사용) -->
+  <link rel="apple-touch-icon" href="icon.png" />
+  <link rel="manifest" href="manifest.json" />
+
+  <!-- React + Recharts CDN -->
+  <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/recharts/2.12.7/Recharts.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&display=swap');
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; background: #080c14; color: #e2e8f0; font-family: 'DM Mono', monospace; overflow: hidden; }
+    #root { height: 100%; display: flex; flex-direction: column; }
+    ::-webkit-scrollbar { width: 3px; }
+    ::-webkit-scrollbar-track { background: #080c14; }
+    ::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 4px; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+    @keyframes spin { to{transform:rotate(360deg)} }
+    @keyframes fadeIn { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:translateY(0)} }
+    .fade-in { animation: fadeIn 0.3s ease both; }
+    button { font-family: inherit; cursor: pointer; }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+// ── ⚠️ 여기에 Cloudflare Worker URL을 입력하세요 ──────────────────
+// 배포 후 wrangler deploy 실행하면 URL이 출력됩니다
+// 예: https://kis-proxy.yusunghwan.workers.dev
+const WORKER_URL = "https://kis-proxy.yusunghwan.workers.dev";
+const API = WORKER_URL; // /api/price/:ticker, /api/chart/:ticker
+// ──────────────────────────────────────────────────────────────────
+
+const ETF_LIST = [
+  { ticker: "069500", name: "KODEX 200" },
+  { ticker: "360750", name: "TIGER 미국S&P500" },
+  { ticker: "133690", name: "TIGER 미국나스닥100" },
+  { ticker: "114800", name: "KODEX 인버스" },
+  { ticker: "229200", name: "KODEX 코스닥150" },
+  { ticker: "132030", name: "KODEX 골드선물" },
+];
+
+// ── 지표 계산 ─────────────────────────────────────────────────────
+const calcEMA = (data, p) => {
+  const k = 2/(p+1); const res = []; let prev = null;
+  data.forEach((v,i) => {
+    if(i < p-1){res.push(null);return;}
+    if(prev===null) prev = data.slice(0,p).reduce((s,x)=>s+x,0)/p;
+    const cur = v*k+prev*(1-k); res.push(+cur.toFixed(2)); prev=cur;
+  });
+  return res;
+};
+
+const calcRSI = (closes, p=14) => {
+  const res = Array(closes.length).fill(null);
+  if(closes.length < p+1) return res;
+  let g=0,l=0;
+  for(let i=1;i<=p;i++){const d=closes[i]-closes[i-1]; if(d>0)g+=d; else l-=d;}
+  let ag=g/p, al=l/p;
+  res[p] = al===0?100:+(100-100/(1+ag/al)).toFixed(2);
+  for(let i=p+1;i<closes.length;i++){
+    const d=closes[i]-closes[i-1];
+    ag=(ag*(p-1)+Math.max(d,0))/p; al=(al*(p-1)+Math.max(-d,0))/p;
+    res[i] = al===0?100:+(100-100/(1+ag/al)).toFixed(2);
+  }
+  return res;
+};
+
+const enrichChart = (candles) => {
+  const closes = candles.map(c=>c.close);
+  const ema20=calcEMA(closes,20), ema60=calcEMA(closes,60), rsi=calcRSI(closes,14);
+  return candles.map((c,i)=>({
+    ...c,
+    date: `${c.date.slice(4,6)}/${c.date.slice(6,8)}`,
+    ema20:ema20[i], ema60:ema60[i], rsi:rsi[i],
+  }));
+};
+
+// ── 컴포넌트 ──────────────────────────────────────────────────────
+const { useState, useEffect, useRef, useCallback } = React;
+const { LineChart,Line,XAxis,YAxis,CartesianGrid,Tooltip,ResponsiveContainer,ReferenceLine } = Recharts;
+
+const Skel = ({w="100%",h=14}) => (
+  <div style={{width:w,height:h,borderRadius:4,background:"#1e293b",animation:"pulse 1.5s infinite"}}/>
+);
+
+const RSIMeter = ({value}) => {
+  if(value==null) return <span style={{color:"#475569",fontSize:11}}>—</span>;
+  const color = value>=70?"#ef4444":value<=30?"#22c55e":"#94a3b8";
+  const label = value>=70?"과매수":value<=30?"과매도":"중립";
+  return (
+    <div style={{width:"100%"}}>
+      <div style={{display:"flex",justifyContent:"space-between",fontSize:10,marginBottom:3}}>
+        <span style={{color,fontWeight:700}}>{value.toFixed(1)}</span>
+        <span style={{color}}>{label}</span>
+      </div>
+      <div style={{height:4,borderRadius:4,background:"#1e293b",overflow:"hidden"}}>
+        <div style={{height:"100%",width:`${value}%`,background:color,borderRadius:4,transition:"width 0.5s"}}/>
+      </div>
+    </div>
+  );
+};
+
+const Signal = ({ema20,ema60}) => {
+  if(!ema20||!ema60) return null;
+  const bull = ema20>ema60;
+  return <span style={{fontSize:11,padding:"2px 10px",borderRadius:20,fontWeight:700,background:bull?"#064e3b":"#450a0a",color:bull?"#34d399":"#f87171"}}>{bull?"▲ 골든크로스":"▼ 데드크로스"}</span>;
+};
+
+// ── 메인 앱 ──────────────────────────────────────────────────────
+function App() {
+  const [etfs,setEtfs]         = useState(ETF_LIST.map(e=>({...e,loading:true})));
+  const [selected,setSelected] = useState(ETF_LIST[0].ticker);
+  const [chartData,setChart]   = useState([]);
+  const [chartType,setChartType] = useState("price");
+  const [chartLoading,setChartLoading] = useState(false);
+  const [serverOk,setServerOk] = useState(null);
+  const [lastUpdate,setLastUpdate] = useState(null);
+  // 아이패드: 사이드바 열림/닫힘 (좁은 화면 대응)
+  const [sideOpen,setSideOpen] = useState(true);
+  const timerRef = useRef(null);
+
+  useEffect(()=>{
+    fetch(`${API}/api/health`).then(r=>r.ok?setServerOk(true):setServerOk(false)).catch(()=>setServerOk(false));
+  },[]);
+
+  const fetchPrices = useCallback(async()=>{
+    const results = await Promise.allSettled(
+      ETF_LIST.map(e=>fetch(`${API}/api/price/${e.ticker}`).then(r=>r.json()))
+    );
+    setEtfs(prev=>prev.map((e,i)=>{
+      const r=results[i];
+      if(r.status==="fulfilled"&&r.value.price) return{...e,...r.value,loading:false,error:false};
+      return{...e,loading:false,error:true};
+    }));
+    setLastUpdate(new Date());
+  },[]);
+
+  const fetchChart = useCallback(async(ticker)=>{
+    setChartLoading(true);
+    try{
+      const r=await fetch(`${API}/api/chart/${ticker}?period=120`);
+      const d=await r.json();
+      setChart(enrichChart(d.candles||[]));
+    }catch{ setChart([]); }
+    finally{ setChartLoading(false); }
+  },[]);
+
+  useEffect(()=>{
+    fetchPrices(); fetchChart(selected);
+    timerRef.current=setInterval(fetchPrices,10000);
+    return()=>clearInterval(timerRef.current);
+  },[]);
+
+  useEffect(()=>{ fetchChart(selected); },[selected]);
+
+  const cur = etfs.find(e=>e.ticker===selected)??{};
+  const display = chartData.slice(-60);
+  const lastBar = chartData[chartData.length-1];
+
+  // iPad safe-area insets
+  const safeTop = "env(safe-area-inset-top, 0px)";
+  const safeBottom = "env(safe-area-inset-bottom, 0px)";
+
+  return (
+    <div style={{display:"flex",flexDirection:"column",height:"100%",paddingTop:safeTop,paddingBottom:safeBottom}}>
+
+      {/* 헤더 */}
+      <div style={{borderBottom:"1px solid #1e293b",padding:"12px 20px",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0}}>
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
+          {/* 사이드바 토글 (아이패드 슬라이드오버 대응) */}
+          <button onClick={()=>setSideOpen(o=>!o)} style={{background:"none",border:"none",color:"#64748b",fontSize:18,padding:"0 4px",lineHeight:1}}>☰</button>
+          <div style={{width:8,height:8,borderRadius:"50%",background:serverOk===null?"#f59e0b":serverOk?"#22c55e":"#ef4444",boxShadow:`0 0 8px ${serverOk?"#22c55e":"#ef4444"}`,animation:"pulse 2s infinite"}}/>
+          <span style={{fontSize:15,fontWeight:700,letterSpacing:"0.1em"}}>ETF MONITOR</span>
+          <span style={{fontSize:10,padding:"2px 8px",borderRadius:4,background:serverOk?"#064e3b":"#450a0a",color:serverOk?"#34d399":"#f87171"}}>
+            {serverOk===null?"연결 중…":serverOk?"KIS 연결됨":"오프라인"}
+          </span>
+        </div>
+        <div style={{fontSize:11,color:"#475569"}}>
+          {lastUpdate?lastUpdate.toLocaleTimeString("ko-KR"):"—"}
+        </div>
+      </div>
+
+      {/* Worker URL 미설정 경고 */}
+      {WORKER_URL.includes("yourname") && (
+        <div style={{background:"#1c100a",border:"1px solid #92400e",margin:"12px 16px",borderRadius:8,padding:"10px 14px",fontSize:12,color:"#fcd34d",lineHeight:1.8}}>
+          ⚠️ <strong>index.html 상단의 WORKER_URL을 Cloudflare Worker 주소로 바꿔주세요.</strong><br/>
+          <code style={{background:"#2d1500",padding:"1px 6px",borderRadius:3}}>wrangler deploy</code> 후 출력된 URL을 복사하세요.
+        </div>
+      )}
+
+      {/* 바디 */}
+      <div style={{display:"flex",flex:1,overflow:"hidden"}}>
+
+        {/* 사이드바 */}
+        {sideOpen && (
+          <div style={{width:260,borderRight:"1px solid #1e293b",overflowY:"auto",flexShrink:0}} className="fade-in">
+            {etfs.map(e=>(
+              <div key={e.ticker} onClick={()=>{setSelected(e.ticker);}} style={{padding:"12px 16px",cursor:"pointer",borderLeft:selected===e.ticker?"2px solid #38bdf8":"2px solid transparent",background:selected===e.ticker?"#0f172a":"transparent",transition:"all 0.15s"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+                  <div>
+                    <div style={{fontWeight:700,fontSize:12,color:selected===e.ticker?"#38bdf8":"#cbd5e1"}}>{e.name}</div>
+                    <div style={{fontSize:10,color:"#475569",marginTop:2}}>{e.ticker}</div>
+                  </div>
+                  <div style={{textAlign:"right"}}>
+                    {e.loading?<Skel w={60} h={12}/>:<>
+                      <div style={{fontWeight:700,fontSize:13}}>{e.price?.toLocaleString()??'—'}</div>
+                      <div style={{fontSize:11,color:(e.change_pct??0)>=0?"#22c55e":"#ef4444"}}>
+                        {(e.change_pct??0)>=0?"+":""}{e.change_pct?.toFixed(2)??"—"}%
+                      </div>
+                    </>}
+                  </div>
+                </div>
+                {selected===e.ticker&&lastBar?.rsi!=null&&(
+                  <div style={{marginTop:8}}><RSIMeter value={lastBar.rsi}/></div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* 메인 */}
+        <div style={{flex:1,overflowY:"auto",padding:20}} className="fade-in">
+
+          {/* 종목 헤더 */}
+          <div style={{marginBottom:16}}>
+            <div style={{display:"flex",alignItems:"baseline",gap:10,flexWrap:"wrap"}}>
+              <span style={{fontSize:20,fontWeight:800,color:"#f8fafc"}}>{cur.name}</span>
+              <span style={{fontSize:11,color:"#64748b"}}>{cur.ticker}</span>
+              {lastBar&&<Signal ema20={lastBar.ema20} ema60={lastBar.ema60}/>}
+            </div>
+            <div style={{marginTop:6,fontSize:26,fontWeight:700}}>
+              {cur.loading?<Skel w={150} h={26}/>:<>
+                {cur.price?.toLocaleString()??'—'}원
+                <span style={{fontSize:14,marginLeft:10,color:(cur.change_pct??0)>=0?"#22c55e":"#ef4444"}}>
+                  {(cur.change_pct??0)>=0?"+":""}{cur.change?.toLocaleString()??'—'} ({(cur.change_pct??0)>=0?"+":""}{cur.change_pct?.toFixed(2)??"—"}%)
+                </span>
+              </>}
+            </div>
+          </div>
+
+          {/* 지표 카드 */}
+          <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:16}}>
+            {[
+              {label:"고가",value:cur.high?.toLocaleString(),color:"#22c55e"},
+              {label:"저가",value:cur.low?.toLocaleString(),color:"#ef4444"},
+              {label:"EMA 20",value:lastBar?.ema20?.toLocaleString(),color:"#f59e0b"},
+              {label:"EMA 60",value:lastBar?.ema60?.toLocaleString(),color:"#a78bfa"},
+              {label:"RSI (14)",value:lastBar?.rsi?.toFixed(1),color:lastBar?.rsi>=70?"#ef4444":lastBar?.rsi<=30?"#22c55e":"#94a3b8"},
+              {label:"거래량",value:cur.volume?.toLocaleString(),color:"#38bdf8"},
+            ].map(c=>(
+              <div key={c.label} style={{background:"#0f172a",border:"1px solid #1e293b",borderRadius:8,padding:"8px 12px"}}>
+                <div style={{fontSize:10,color:"#475569",marginBottom:3}}>{c.label}</div>
+                {cur.loading?<Skel w={50} h={14}/>:<div style={{fontSize:13,fontWeight:700,color:c.color}}>{c.value??'—'}</div>}
+              </div>
+            ))}
+          </div>
+
+          {/* 차트 탭 */}
+          <div style={{display:"flex",gap:8,marginBottom:10}}>
+            {[["price","가격 + EMA"],["rsi","RSI"]].map(([t,label])=>(
+              <button key={t} onClick={()=>setChartType(t)} style={{padding:"5px 14px",borderRadius:6,fontSize:12,fontWeight:600,background:chartType===t?"#1e293b":"transparent",border:chartType===t?"1px solid #38bdf8":"1px solid #1e293b",color:chartType===t?"#38bdf8":"#64748b"}}>
+                {label}
+              </button>
+            ))}
+            <button onClick={()=>{fetchPrices();fetchChart(selected);}} style={{marginLeft:"auto",padding:"5px 12px",borderRadius:6,fontSize:12,fontWeight:600,background:"transparent",border:"1px solid #1e293b",color:"#64748b"}}>
+              ⟳
+            </button>
+          </div>
+
+          {/* 차트 */}
+          <div style={{background:"#0a1020",border:"1px solid #1e293b",borderRadius:10,padding:"14px 4px",position:"relative"}}>
+            {chartLoading&&(
+              <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",background:"#0a1020cc",borderRadius:10,zIndex:10}}>
+                <div style={{width:24,height:24,border:"2px solid #38bdf8",borderTopColor:"transparent",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/>
+              </div>
+            )}
+
+            {chartType==="price"?(
+              <>
+                <ResponsiveContainer width="100%" height={220}>
+                  <LineChart data={display}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#1e293b"/>
+                    <XAxis dataKey="date" tick={{fontSize:9,fill:"#475569"}} interval={9}/>
+                    <YAxis domain={["auto","auto"]} tick={{fontSize:9,fill:"#475569"}} width={62} tickFormatter={v=>v.toLocaleString()}/>
+                    <Tooltip contentStyle={{background:"#0f172a",border:"1px solid #1e293b",borderRadius:6,fontSize:11}} formatter={(v,name)=>[v?.toLocaleString(),name==="close"?"종가":name==="ema20"?"EMA 20":"EMA 60"]}/>
+                    <Line type="monotone" dataKey="close" stroke="#e2e8f0" dot={false} strokeWidth={1.5}/>
+                    <Line type="monotone" dataKey="ema20" stroke="#f59e0b" dot={false} strokeWidth={1.5} strokeDasharray="4 2"/>
+                    <Line type="monotone" dataKey="ema60" stroke="#a78bfa" dot={false} strokeWidth={1.5} strokeDasharray="4 2"/>
+                  </LineChart>
+                </ResponsiveContainer>
+                <div style={{display:"flex",gap:16,justifyContent:"center",marginTop:8}}>
+                  {[["종가","#e2e8f0"],["EMA 20","#f59e0b"],["EMA 60","#a78bfa"]].map(([l,c])=>(
+                    <div key={l} style={{display:"flex",alignItems:"center",gap:5,fontSize:10,color:"#64748b"}}>
+                      <div style={{width:16,height:2,background:c}}/>{l}
+                    </div>
+                  ))}
+                </div>
+              </>
+            ):(
+              <>
+                <ResponsiveContainer width="100%" height={220}>
+                  <LineChart data={display}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#1e293b"/>
+                    <XAxis dataKey="date" tick={{fontSize:9,fill:"#475569"}} interval={9}/>
+                    <YAxis domain={[0,100]} tick={{fontSize:9,fill:"#475569"}} width={32}/>
+                    <Tooltip contentStyle={{background:"#0f172a",border:"1px solid #1e293b",borderRadius:6,fontSize:11}} formatter={v=>[v?.toFixed(1),"RSI"]}/>
+                    <ReferenceLine y={70} stroke="#ef4444" strokeDasharray="4 2" label={{value:"과매수(70)",fill:"#ef4444",fontSize:9,position:"insideTopLeft"}}/>
+                    <ReferenceLine y={30} stroke="#22c55e" strokeDasharray="4 2" label={{value:"과매도(30)",fill:"#22c55e",fontSize:9,position:"insideBottomLeft"}}/>
+                    <Line type="monotone" dataKey="rsi" stroke="#38bdf8" dot={false} strokeWidth={2} connectNulls={false}/>
+                  </LineChart>
+                </ResponsiveContainer>
+                <div style={{marginTop:10,padding:"8px 12px",background:"#0f172a",borderRadius:8,fontSize:11,color:"#64748b",lineHeight:1.8}}>
+                  <span style={{color:"#ef4444"}}>● ≥70 과매수</span> &nbsp;
+                  <span style={{color:"#22c55e"}}>● ≤30 과매도</span> &nbsp;
+                  <span style={{color:"#94a3b8"}}>● 30~70 중립</span>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
