@@ -183,7 +183,7 @@ function App() {
   const [serverOk,setServerOk]   = useState(null);
   const [lastUpdate,setLastUpdate] = useState(null);
   const [sideOpen,setSideOpen]   = useState(true);
-  const timerRef = useRef(null);
+
 
   useEffect(()=>{
     fetch(`${API}/api/health`).then(r=>r.ok?setServerOk(true):setServerOk(false)).catch(()=>setServerOk(false));
@@ -195,7 +195,7 @@ function App() {
     );
     setEtfs(prev=>prev.map((e,i)=>{
       const r=results[i];
-      if(r.status==="fulfilled"&&r.value.price) return{...e,...r.value, name:e.name, loading:false,error:false};
+      if(r.status==="fulfilled"&&r.value.price){ const {name:_ignore, ...rest}=r.value; return{...e,...rest, loading:false,error:false}; }
       return{...e,loading:false,error:true};
     }));
     setLastUpdate(new Date());
@@ -215,8 +215,6 @@ function App() {
 
   useEffect(()=>{
     fetchPrices(); fetchChart(selected);
-    timerRef.current=setInterval(fetchPrices,10000);
-    return()=>clearInterval(timerRef.current);
   },[]);
 
   useEffect(()=>{ fetchChart(selected); },[selected]);
