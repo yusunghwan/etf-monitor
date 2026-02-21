@@ -195,7 +195,7 @@ function App() {
     );
     setEtfs(prev=>prev.map((e,i)=>{
       const r=results[i];
-      if(r.status==="fulfilled"&&r.value.price) return{...e,...r.value,loading:false,error:false};
+      if(r.status==="fulfilled"&&r.value.price) return{...e,...r.value, name:e.name, loading:false,error:false};
       return{...e,loading:false,error:true};
     }));
     setLastUpdate(new Date());
