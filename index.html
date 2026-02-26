@@ -20,6 +20,23 @@
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { height: 100%; background: #080c14; color: #e2e8f0; font-family: 'DM Mono', monospace; overflow: hidden; }
     #root { height: 100%; display: flex; flex-direction: column; }
+    .main-layout { display: flex; flex: 1; overflow: hidden; }
+    .sidebar { width: 220px; border-right: 1px solid #1e293b; flex-shrink: 0; display: flex; flex-direction: column; overflow-y: auto; }
+    .sidebar-list { flex: 1; overflow-y: auto; }
+    .detail-panel { flex: 1; overflow-y: auto; padding: 20px; }
+    .sticky-header { position: static; }
+    /* 모바일 전용 */
+    @media (max-width: 600px) {
+      .sidebar { width: 100% !important; border-right: none; }
+      .detail-panel { padding: 12px; width: 100% !important; }
+      .detail-panel.mobile-detail-only .sticky-header {
+        position: sticky; top: 0; z-index: 10;
+        background: #0a1020;
+        padding-bottom: 12px;
+        border-bottom: 1px solid #1e293b;
+        margin-bottom: 12px;
+      }
+    }
     ::-webkit-scrollbar { width: 3px; }
     ::-webkit-scrollbar-track { background: #080c14; }
     ::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 4px; }
@@ -37,40 +54,7 @@
 const WORKER_URL = "https://kis-proxy.yusunghwan.workers.dev";
 const API = WORKER_URL;
 
-// ═══════════════════════════════════════════════════════════════
-//  ★ 종목 추가/변경 방법
-//
-//  아래 ETF_LIST 배열에 항목을 추가하거나 수정하세요.
-//  ticker : KRX 종목코드 (6자리 숫자)
-//  name   : 화면에 표시할 이름 (자유롭게 입력)
-//
-//  예시) { ticker: "102110", name: "TIGER 200" },
-//       { ticker: "kodex레버리지", name: "KODEX 레버리지" },
-//
-//  주요 ETF 종목코드 참고:
-//  069500  KODEX 200
-//  102110  TIGER 200
-//  360750  TIGER 미국S&P500
-//  133690  TIGER 미국나스닥100
-//  114800  KODEX 인버스
-//  252670  KODEX 200선물인버스2X
-//  229200  KODEX 코스닥150
-//  132030  KODEX 골드선물
-//  139660  TIGER 미국달러단기채권액티브
-//  385560  TIGER 미국채10년선물
-// ═══════════════════════════════════════════════════════════════
-const ETF_LIST = [
-  { ticker: "251350", name: "KODEX MSCI선진국" },
-  { ticker: "133690", name: "TIGER 미국나스닥100" },  
-  { ticker: "381170", name: "TIGER 미국테크TOP10 INDXX" },
-  { ticker: "069500", name: "KODEX 200" },
-  { ticker: "292150", name: "TIGER 코리아TOP10" },
-  { ticker: "411060", name: "ACE KRX금현물" },
-  { ticker: "144600", name: "KODEX 은선물(H)" },
-  { ticker: "453850", name: "ACE 미국채30년액티브(H)" },
-  { ticker: "385560", name: "TIGER 미국채10년선물" },
-  { ticker: "139660", name: "TIGER 미국달러단기채권액티브" },
-];
+// ETF 목록은 Cloudflare KV에서 동적으로 불러옵니다.
 
 // ── 지표 계산 ─────────────────────────────────────────────────────
 const calcEMA = (data, p) => {
@@ -236,8 +220,9 @@ const Signal = ({ema20,ema60}) => {
 
 // ── 메인 앱 ──────────────────────────────────────────────────────
 function App() {
-  const [etfs,setEtfs]           = useState(ETF_LIST.map(e=>({...e,loading:true})));
-  const [selected,setSelected]   = useState(ETF_LIST[0].ticker);
+  const [etfs,setEtfs]           = useState([]);
+  const [selected,setSelected]   = useState(null);
+
   const [rawCandles,setRawCandles] = useState([]); // 원본 일봉 데이터
   const [chartUnit,setChartUnit] = useState("D");  // D/W/M
   const [chartType,setChartType] = useState("price");
@@ -245,15 +230,28 @@ function App() {
   const [serverOk,setServerOk]   = useState(null);
   const [lastUpdate,setLastUpdate] = useState(null);
   const [sideOpen,setSideOpen]   = useState(true);
+  const [mobileTab,setMobileTab] = useState("list"); // "list" | "detail"
+  const [isMobile,setIsMobile] = useState(window.innerWidth <= 600);
+  useEffect(()=>{
+    const onResize = () => {
+      const mobile = window.innerWidth <= 600;
+      setIsMobile(mobile);
+      // 가로 전환 시 탭 상태 리셋
+      if(!mobile) setMobileTab("list");
+    };
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  },[]);
 
 
   useEffect(()=>{
     fetch(`${API}/api/health`).then(r=>r.ok?setServerOk(true):setServerOk(false)).catch(()=>setServerOk(false));
   },[]);
 
-  const fetchPrices = useCallback(async()=>{
+  const fetchPrices = useCallback(async(etfList)=>{
+    if(!etfList||!etfList.length) return;
     const results = await Promise.allSettled(
-      ETF_LIST.map(e=>fetch(`${API}/api/price/${e.ticker}`).then(r=>r.json()))
+      etfList.map(e=>fetch(`${API}/api/price/${e.ticker}`).then(r=>r.json()))
     );
     setEtfs(prev=>prev.map((e,i)=>{
       const r=results[i];
@@ -262,6 +260,22 @@ function App() {
     }));
     setLastUpdate(new Date());
   },[]);
+
+  // KV에서 ETF 목록 불러오기
+  const fetchEtfList = useCallback(async()=>{
+    try {
+      const r = await fetch(`${API}/api/etf/list`);
+      const d = await r.json();
+      const list = d.list || [];
+      if(list.length === 0) return [];
+      setEtfs(list.map(e=>({...e,loading:true})));
+      if(list.length>0) setSelected(prev=>prev||list[0].ticker);
+      fetchPrices(list);
+      return list;
+    } catch(e) { return []; }
+  },[fetchPrices]);
+
+
 
   const fetchChart = useCallback(async(ticker)=>{
     setChartLoading(true);
@@ -276,10 +290,12 @@ function App() {
   },[]);
 
   useEffect(()=>{
-    fetchPrices(); fetchChart(selected);
+    fetchEtfList().then(list=>{
+      if(list.length>0) fetchChart(list[0].ticker);
+    });
   },[]);
 
-  useEffect(()=>{ fetchChart(selected); },[selected]);
+  useEffect(()=>{ if(selected) fetchChart(selected); },[selected]);
 
   const cur = etfs.find(e=>e.ticker===selected)??{};
 
@@ -319,13 +335,17 @@ function App() {
         </div>
       </div>
 
-      <div style={{display:"flex",flex:1,overflow:"hidden"}}>
+      <div className="main-layout">
 
         {/* ── 사이드바 ── */}
         {sideOpen && (
-          <div style={{width:220,borderRight:"1px solid #1e293b",overflowY:"auto",flexShrink:0}} className="fade-in">
+          <div className="sidebar fade-in" style={{
+            display: isMobile && mobileTab==="detail" ? "none" : "flex",
+            flexDirection:"column"
+          }}>
+            <div className="sidebar-list">
             {etfs.map(e=>(
-              <div key={e.ticker} onClick={()=>setSelected(e.ticker)}
+              <div key={e.ticker} onClick={()=>{setSelected(e.ticker); if(isMobile) setMobileTab("detail");}}
                 style={{padding:"12px 14px",cursor:"pointer",
                   borderLeft:selected===e.ticker?"2px solid #38bdf8":"2px solid transparent",
                   background:selected===e.ticker?"#0f172a":"transparent",transition:"all 0.15s"}}>
@@ -349,19 +369,30 @@ function App() {
                   </div>
                 </div>
 
+
                 {selected===e.ticker&&lastBar?.rsi!=null&&(
                   <div style={{marginTop:8}}><RSIMeter value={lastBar.rsi}/></div>
                 )}
               </div>
             ))}
+            </div>
           </div>
         )}
 
         {/* ── 메인 패널 ── */}
-        <div style={{flex:1,overflowY:"auto",padding:20}} className="fade-in">
+        <div className={`detail-panel fade-in${isMobile&&mobileTab==="detail"?" mobile-detail-only":""}`}
+          style={{display: isMobile && mobileTab==="list" ? "none" : undefined}}>
 
-          {/* 종목 헤더 */}
-          <div style={{marginBottom:16}}>
+          {/* 모바일 뒤로가기 버튼 */}
+          {isMobile && mobileTab==="detail" && (
+            <button onClick={()=>setMobileTab("list")}
+              style={{display:"flex",alignItems:"center",gap:6,marginBottom:10,padding:"6px 10px",
+                background:"transparent",border:"none",color:"#38bdf8",fontSize:13,cursor:"pointer"}}>
+              ← 목록으로
+            </button>
+          )}
+          {/* 종목 헤더 — sticky */}
+          <div className="sticky-header">
             <div style={{display:"flex",alignItems:"baseline",gap:10,flexWrap:"wrap"}}>
               <span style={{fontSize:20,fontWeight:800,color:"#f8fafc"}}>{cur.name}</span>
               <span style={{fontSize:11,color:"#64748b"}}>{cur.ticker}</span>
@@ -717,6 +748,7 @@ function App() {
           </div>
         </div>
       </div>
+
     </div>
   );
 }
