@@ -232,6 +232,9 @@ function App() {
   const [sideOpen,setSideOpen]   = useState(true);
   const [mobileTab,setMobileTab] = useState("list"); // "list" | "detail"
   const [isMobile,setIsMobile] = useState(window.innerWidth <= 600);
+  const [collapsedGroups,setCollapsedGroups] = useState({});
+  const [links,setLinks] = useState([]);
+  const toggleGroup = (group) => setCollapsedGroups(prev=>({...prev,[group]:!prev[group]}));
   useEffect(()=>{
     const onResize = () => {
       const mobile = window.innerWidth <= 600;
@@ -293,6 +296,10 @@ function App() {
     fetchEtfList().then(list=>{
       if(list.length>0) fetchChart(list[0].ticker);
     });
+    // 링크 목록 로드
+    fetch(`${API}/api/links`).then(r=>r.json()).then(d=>{
+      setLinks(d.links||[]);
+    }).catch(()=>{});
   },[]);
 
   useEffect(()=>{ if(selected) fetchChart(selected); },[selected]);
@@ -326,12 +333,23 @@ function App() {
           <button onClick={()=>setSideOpen(o=>!o)} style={{background:"none",border:"none",color:"#64748b",fontSize:18,padding:"0 4px",lineHeight:1}}>☰</button>
           <div style={{width:8,height:8,borderRadius:"50%",background:serverOk===null?"#f59e0b":serverOk?"#22c55e":"#ef4444",boxShadow:`0 0 8px ${serverOk?"#22c55e":"#ef4444"}`,animation:"pulse 2s infinite"}}/>
           <span style={{fontSize:15,fontWeight:700,letterSpacing:"0.1em"}}>ETF MONITOR</span>
+          <span style={{fontSize:9,color:"#64748b",marginLeft:4,fontWeight:600,letterSpacing:"0.05em"}}>v0.2</span>
           <span style={{fontSize:10,padding:"2px 8px",borderRadius:4,background:serverOk?"#064e3b":"#450a0a",color:serverOk?"#34d399":"#f87171"}}>
             {serverOk===null?"연결 중…":serverOk?"KIS 연결됨":"오프라인"}
           </span>
         </div>
-        <div style={{fontSize:11,color:"#475569"}}>
-          {lastUpdate?lastUpdate.toLocaleTimeString("ko-KR"):"—"}
+        <div style={{display:"flex",alignItems:"center",gap:8}}>
+          {links.map(lk=>(
+            <a key={lk.name} href={lk.url} target="_blank" rel="noopener noreferrer"
+              style={{fontSize:11,padding:"3px 10px",borderRadius:5,
+                background:"#0f172a",border:"1px solid #334155",
+                color:"#94a3b8",textDecoration:"none",whiteSpace:"nowrap",cursor:"pointer"}}>
+              {lk.name}
+            </a>
+          ))}
+          <div style={{fontSize:11,color:"#475569"}}>
+            {lastUpdate?lastUpdate.toLocaleTimeString("ko-KR"):"—"}
+          </div>
         </div>
       </div>
 
@@ -344,37 +362,51 @@ function App() {
             flexDirection:"column"
           }}>
             <div className="sidebar-list">
-            {etfs.map(e=>(
-              <div key={e.ticker} onClick={()=>{setSelected(e.ticker); if(isMobile) setMobileTab("detail");}}
-                style={{padding:"12px 14px",cursor:"pointer",
-                  borderLeft:selected===e.ticker?"2px solid #38bdf8":"2px solid transparent",
-                  background:selected===e.ticker?"#0f172a":"transparent",transition:"all 0.15s"}}>
-
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
-                  <div style={{flex:1,minWidth:0,marginRight:8}}>
-                    {/* ★ 1번 수정: 종목명 크게, 코드 작게 */}
-                    <div style={{fontWeight:700,fontSize:13,color:selected===e.ticker?"#38bdf8":"#f1f5f9",
-                      whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
-                      {e.name}
-                    </div>
-                    <div style={{fontSize:10,color:"#475569",marginTop:2}}>{e.ticker}</div>
+            {(()=>{
+              const groups = [];
+              const seen = [];
+              etfs.forEach(e=>{ const g=e.group||"기타"; if(!seen.includes(g)){seen.push(g);groups.push(g);} });
+              return groups.map(group=>(
+                <div key={group}>
+                  <div onClick={()=>toggleGroup(group)}
+                    style={{padding:"7px 14px",fontSize:10,fontWeight:700,
+                      color:"#64748b",letterSpacing:"0.08em",
+                      borderBottom:"1px solid #1e293b",background:"#080d18",
+                      cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",
+                      userSelect:"none"}}>
+                    <span>{group}</span>
+                    <span style={{fontSize:9,color:"#334155"}}>{collapsedGroups[group]?"▶":"▼"}</span>
                   </div>
-                  <div style={{textAlign:"right",flexShrink:0}}>
-                    {e.loading?<Skel w={55} h={12}/>:<>
-                      <div style={{fontWeight:700,fontSize:12}}>{e.price?.toLocaleString()??'—'}</div>
-                      <div style={{fontSize:11,color:(e.change_pct??0)>=0?"#22c55e":"#ef4444"}}>
-                        {(e.change_pct??0)>=0?"+":""}{e.change_pct?.toFixed(2)??"—"}%
+                  {!collapsedGroups[group] && etfs.filter(e=>(e.group||"기타")===group).map(e=>(
+                    <div key={e.ticker} onClick={()=>{setSelected(e.ticker); if(isMobile) setMobileTab("detail");}}
+                      style={{padding:"12px 14px",cursor:"pointer",
+                        borderLeft:selected===e.ticker?"2px solid #38bdf8":"2px solid transparent",
+                        background:selected===e.ticker?"#0f172a":"transparent",transition:"all 0.15s"}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+                        <div style={{flex:1,minWidth:0,marginRight:8}}>
+                          <div style={{fontWeight:700,fontSize:13,color:selected===e.ticker?"#38bdf8":"#f1f5f9",
+                            whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
+                            {e.name}
+                          </div>
+                          <div style={{fontSize:10,color:"#475569",marginTop:2}}>{e.ticker}</div>
+                        </div>
+                        <div style={{textAlign:"right",flexShrink:0}}>
+                          {e.loading?<Skel w={55} h={12}/>:<>
+                            <div style={{fontWeight:700,fontSize:12}}>{e.price?.toLocaleString()??'—'}</div>
+                            <div style={{fontSize:11,color:(e.change_pct??0)>=0?"#22c55e":"#ef4444"}}>
+                              {(e.change_pct??0)>=0?"+":""}{e.change_pct?.toFixed(2)??"—"}%
+                            </div>
+                          </>}
+                        </div>
                       </div>
-                    </>}
-                  </div>
+                      {selected===e.ticker&&lastBar?.rsi!=null&&(
+                        <div style={{marginTop:8}}><RSIMeter value={lastBar.rsi}/></div>
+                      )}
+                    </div>
+                  ))}
                 </div>
-
-
-                {selected===e.ticker&&lastBar?.rsi!=null&&(
-                  <div style={{marginTop:8}}><RSIMeter value={lastBar.rsi}/></div>
-                )}
-              </div>
-            ))}
+              ));
+            })()}
             </div>
           </div>
         )}
@@ -409,21 +441,32 @@ function App() {
           </div>
 
           {/* 지표 카드 */}
+          {(()=>{
+            const unitLabel = chartUnit==="D"?"일봉":chartUnit==="W"?"주봉":"월봉";
+            // 봉 기준 고가/저가/RSI
+            const barHigh  = lastBar?.high?.toLocaleString();
+            const barLow   = lastBar?.low?.toLocaleString();
+            const barRSI   = lastBar?.rsi;
+            const rsiColor = barRSI>=70?"#ef4444":barRSI<=30?"#22c55e":"#94a3b8";
+            const cards = [
+              {label:`고가 (${unitLabel})`, value:barHigh,  color:"#22c55e"},
+              {label:`저가 (${unitLabel})`, value:barLow,   color:"#ef4444"},
+              {label:`EMA 20 (${unitLabel})`, value:lastBar?.ema20?.toLocaleString(), color:"#f59e0b"},
+              {label:`EMA 60 (${unitLabel})`, value:lastBar?.ema60?.toLocaleString(), color:"#a78bfa"},
+              {label:`RSI (${unitLabel})`,  value:barRSI?.toFixed(1), color:rsiColor},
+              {label:"거래량", value:cur.volume?.toLocaleString(), color:"#38bdf8"},
+            ];
+            return (
           <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:16}}>
-            {[
-              {label:"고가",value:cur.high?.toLocaleString(),color:"#22c55e"},
-              {label:"저가",value:cur.low?.toLocaleString(),color:"#ef4444"},
-              {label:"EMA 20",value:lastBar?.ema20?.toLocaleString(),color:"#f59e0b"},
-              {label:"EMA 60",value:lastBar?.ema60?.toLocaleString(),color:"#a78bfa"},
-              {label:"RSI 일봉",value:lastRSI?.rsiD?.toFixed(1),color:lastRSI?.rsiD>=70?"#ef4444":lastRSI?.rsiD<=30?"#22c55e":"#94a3b8"},
-              {label:"거래량",value:cur.volume?.toLocaleString(),color:"#38bdf8"},
-            ].map(c=>(
+            {cards.map(c=>(
               <div key={c.label} style={{background:"#0f172a",border:"1px solid #1e293b",borderRadius:8,padding:"8px 12px"}}>
                 <div style={{fontSize:10,color:"#475569",marginBottom:3}}>{c.label}</div>
                 {cur.loading?<Skel w={50} h={14}/>:<div style={{fontSize:13,fontWeight:700,color:c.color}}>{c.value??'—'}</div>}
               </div>
             ))}
           </div>
+            );
+          })()}
 
           {/* 차트 컨트롤 */}
           <div style={{display:"flex",gap:8,marginBottom:10,flexWrap:"wrap",alignItems:"center"}}>
