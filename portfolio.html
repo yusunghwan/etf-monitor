@@ -1,0 +1,720 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>포트폴리오</title>
+<link rel="manifest" href="manifest.json">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700&family=DM+Mono:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prop-types/15.8.1/prop-types.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+<script src="https://unpkg.com/recharts@2.8.0/umd/Recharts.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>
+  :root {
+    --bg: #0b0d11;
+    --s1: #13161e;
+    --s2: #191d28;
+    --border: #222638;
+    --border2: #2d3348;
+    --a1: #4f8ef7;
+    --a2: #52e0a0;
+    --a3: #f0a84e;
+    --a4: #c084fc;
+    --danger: #f47070;
+    --text: #dde3f0;
+    --text2: #9aa5c0;
+    --text3: #6b7899;
+    --mono: 'DM Mono', monospace;
+    --sans: 'Noto Sans KR', sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    -webkit-font-smoothing: antialiased;
+  }
+  #root { min-height: 100vh; }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 3px; height: 3px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+
+  /* Loading */
+  .loading-screen {
+    position: fixed; inset: 0;
+    background: var(--bg);
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 16px; z-index: 100;
+  }
+  .loading-ring {
+    width: 40px; height: 40px;
+    border: 2px solid var(--border2);
+    border-top-color: var(--a1);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  .loading-text {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--text3);
+    letter-spacing: 1px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Error */
+  .error-box {
+    margin: 40px auto; max-width: 480px;
+    background: var(--s1); border: 1px solid #f4707040;
+    border-radius: 12px; padding: 24px;
+    font-family: var(--mono); font-size: 12px;
+    color: var(--danger); line-height: 1.7;
+  }
+
+  /* Layout */
+  .app { padding: 20px 20px 40px; max-width: 1100px; margin: 0 auto; }
+
+  /* Header */
+  .hdr {
+    display: flex; align-items: flex-start;
+    justify-content: space-between; margin-bottom: 24px;
+  }
+  .hdr-title {
+    font-size: 18px; font-weight: 700;
+    letter-spacing: -0.5px; color: var(--text);
+  }
+  .hdr-sub {
+    font-family: var(--mono); font-size: 10px;
+    color: var(--text3); margin-top: 3px;
+    letter-spacing: 0.5px;
+  }
+  .hdr-badge {
+    font-family: var(--mono); font-size: 10px;
+    color: var(--text3); background: var(--s1);
+    border: 1px solid var(--border);
+    padding: 5px 10px; border-radius: 20px;
+    white-space: nowrap;
+  }
+  .hdr-badge em { color: var(--a2); font-style: normal; }
+
+  /* KPI row */
+  .kpi-row {
+    margin-bottom: 14px;
+  }
+  .kpi {
+    background: var(--s1); border: 1px solid var(--border);
+    border-radius: 10px; padding: 16px 18px;
+    position: relative; overflow: hidden;
+    animation: fadeUp 0.4s ease both;
+  }
+  .kpi::after {
+    content: ''; position: absolute;
+    top: 0; left: 0; right: 0; height: 2px;
+  }
+  .kpi.total::after { background: linear-gradient(90deg, var(--a1), var(--a2)); }
+  .kpi.c0::after { background: var(--a1); }
+  .kpi.c1::after { background: var(--a2); }
+  .kpi.c2::after { background: var(--a4); }
+  .kpi.c3::after { background: var(--a3); }
+  .kpi-lbl { font-size: 10px; color: var(--text3); letter-spacing: 0.6px; text-transform: uppercase; margin-bottom: 8px; }
+  .kpi-val {
+    font-family: var(--mono); font-size: 22px;
+    font-weight: 500; letter-spacing: -0.5px; line-height: 1;
+  }
+  .kpi.total .kpi-val { font-size: 28px; }
+  .kpi-sub { font-family: var(--mono); font-size: 10px; color: var(--text3); margin-top: 6px; }
+  .kpi-chg { font-family: var(--mono); font-size: 11px; margin-top: 5px; font-weight: 500; }
+  .up { color: var(--a2); }
+  .dn { color: var(--danger); }
+  .neu { color: var(--text3); }
+
+  /* Account strip */
+  .acct-strip-wrap { position: relative; margin-top: 14px; }
+  .acct-strip {
+    display: flex; height: 5px; border-radius: 3px; overflow: hidden;
+    cursor: pointer;
+  }
+  .acct-seg {
+    height: 100%; transition: opacity 0.15s;
+  }
+  .acct-strip:hover .acct-seg { opacity: 0.75; }
+  .acct-strip:hover .acct-seg:hover { opacity: 1; }
+
+  /* Account popup */
+  .acct-popup {
+    position: absolute; top: 12px; left: 0; right: 0;
+    background: var(--s2); border: 1px solid var(--border2);
+    border-radius: 10px; padding: 14px 16px;
+    display: flex; flex-direction: column; gap: 10px;
+    z-index: 10;
+    animation: fadeUp 0.15s ease both;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+  }
+  .acct-popup-row {
+    display: flex; align-items: center; gap: 10px;
+  }
+  .acct-popup-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+  .acct-popup-name { flex: 1; font-size: 12px; color: var(--text2); }
+  .acct-popup-num { font-family: var(--mono); font-size: 10px; color: var(--text3); }
+  .acct-popup-right { text-align: right; }
+  .acct-popup-val { font-family: var(--mono); font-size: 13px; color: var(--text); }
+  .acct-popup-pct { font-family: var(--mono); font-size: 10px; color: var(--text3); }
+  .acct-popup-bar-bg { width: 60px; height: 3px; background: var(--border); border-radius: 2px; overflow: hidden; flex-shrink: 0; }
+  .acct-popup-bar-fill { height: 100%; border-radius: 2px; }
+
+  /* Main grid */
+  .main-grid { display: grid; grid-template-columns: 1fr 340px; gap: 12px; margin-bottom: 12px; }
+
+  /* Card */
+  .card {
+    background: var(--s1); border: 1px solid var(--border);
+    border-radius: 10px; padding: 18px 20px;
+    animation: fadeUp 0.4s ease both;
+  }
+  .card-hdr {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 14px;
+  }
+  .card-title { font-size: 11px; color: var(--text3); letter-spacing: 0.6px; text-transform: uppercase; font-weight: 500; }
+
+  /* Period tabs */
+  .ptabs { display: flex; gap: 3px; }
+  .ptab {
+    font-family: var(--mono); font-size: 10px;
+    padding: 3px 7px; border-radius: 4px; cursor: pointer;
+    color: var(--text3); border: 1px solid transparent;
+    transition: all 0.15s; background: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .ptab.on { color: var(--a1); border-color: var(--a1); background: rgba(79,142,247,0.08); }
+
+  /* Recharts overrides */
+  .recharts-tooltip-wrapper { outline: none; }
+  .ct { background: var(--s2) !important; border: 1px solid var(--border2) !important; border-radius: 8px !important; padding: 10px 14px !important; }
+  .ct-date { font-family: var(--mono); font-size: 10px; color: var(--text3); margin-bottom: 6px; }
+  .ct-row { display: flex; justify-content: space-between; gap: 20px; margin-bottom: 3px; }
+  .ct-lbl { font-family: var(--mono); font-size: 11px; color: var(--text3); }
+  .ct-val { font-family: var(--mono); font-size: 11px; color: var(--text); }
+
+  /* Account list */
+  .acct-list { display: flex; flex-direction: column; gap: 10px; }
+  .acct-item { display: flex; align-items: center; gap: 10px; }
+  .acct-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+  .acct-info { flex: 1; min-width: 0; }
+  .acct-name { font-size: 12px; color: var(--text2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .acct-num { font-family: var(--mono); font-size: 10px; color: var(--text3); }
+  .acct-right { text-align: right; flex-shrink: 0; }
+  .acct-val { font-family: var(--mono); font-size: 13px; color: var(--text); }
+  .acct-pct { font-family: var(--mono); font-size: 10px; color: var(--text3); }
+  .acct-bar-bg { width: 64px; height: 3px; background: var(--border); border-radius: 2px; overflow: hidden; flex-shrink: 0; }
+  .acct-bar-fill { height: 100%; border-radius: 2px; transition: width 0.8s cubic-bezier(.4,0,.2,1); }
+
+  .divider { height: 1px; background: var(--border); margin: 8px 0; }
+
+  /* Donut */
+  .donut-wrap { display: flex; justify-content: center; margin-top: 6px; }
+
+  /* Bottom grid */
+  .bot-grid { display: grid; grid-template-columns: 1fr; gap: 12px; }
+
+  /* Holdings table */
+  .htbl { width: 100%; border-collapse: collapse; }
+  .htbl th { font-size: 10px; color: var(--text2); letter-spacing: 0.4px; text-align: left; padding: 0 0 8px; border-bottom: 1px solid var(--border); font-weight: 500; }
+  .htbl th { padding: 0 6px 8px; }
+  .htbl th:first-child { padding-left: 0; }
+  .htbl th:not(:first-child) { text-align: right; }
+  .htbl td { font-size: 12px; color: var(--text); padding: 7px 6px; border-bottom: 1px solid rgba(34,38,56,0.5); vertical-align: middle; }
+  .htbl td:not(:first-child) { text-align: right; font-family: var(--mono); font-size: 11px; color: var(--text); }
+  .htbl tr:last-child td { border-bottom: none; }
+  .sname { font-size: 12px; color: var(--text); line-height: 1.3; }
+  .sbroker { font-size: 10px; color: var(--text3); }
+  .pbar { display: inline-flex; align-items: center; gap: 5px; }
+  .pb-bg { width: 32px; height: 3px; background: var(--border); border-radius: 2px; overflow: hidden; }
+  .pb-fill { height: 100%; border-radius: 2px; }
+
+  /* Return legend */
+  .ret-legend { display: flex; gap: 14px; margin-bottom: 12px; flex-wrap: wrap; }
+  .rleg { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text3); }
+  .rleg-line { width: 16px; height: 2px; border-radius: 1px; }
+
+  /* Animations */
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .card:nth-child(1) { animation-delay: 0.05s; }
+  .card:nth-child(2) { animation-delay: 0.10s; }
+  .card:nth-child(3) { animation-delay: 0.15s; }
+  .card:nth-child(4) { animation-delay: 0.20s; }
+
+  .kpi-main-wrap { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+  .kpi-accts-wrap { display: flex; gap: 20px; flex-shrink: 0; align-items: flex-start; padding-top: 2px; }
+
+  @media (max-width: 768px) {
+    .app { padding: 14px 14px 40px; }
+    .kpi-row { grid-template-columns: 1fr 1fr; }
+    .kpi.total { grid-column: 1 / -1; }
+    .main-grid { grid-template-columns: 1fr; }
+    .bot-grid { grid-template-columns: 1fr; }
+    .kpi-main-wrap { flex-direction: column; gap: 12px; }
+    .kpi-accts-wrap { flex-wrap: wrap; gap: 16px; width: 100%; justify-content: flex-start; padding-top: 4px; border-top: 1px solid var(--border); }
+  }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+const WORKER = "https://kis-proxy.yusunghwan.workers.dev";
+
+// ── i18n ────────────────────────────────────────────────────────
+const I18N = {
+  ko: {
+    title: "포트폴리오", sub: "PORTFOLIO DASHBOARD", update: "업데이트",
+    totalNet: "전체 순자산", stock: "주식", deposit: "예수금",
+    noPrevDay: "— 전일 데이터 없음", timeline: "전체 잔고 타임라인",
+    assetWeight: "자산군별 비중", assetAlloc: "자산 배분",
+    holdings: "보유 종목",
+    colRank: "순위", colName: "종목명", colValue: "평가금액",
+    colQty: "수량", colQtyChg: "증감", colWeight: "비중",
+    colPriceChg: "가격 증감", colAsset: "자산군",
+    errTitle: "⚠ 데이터 로드 실패", errMsg: "인증이 필요하거나 서버에 일시적인 문제가 발생했습니다.",
+    errGuide: "브라우저에서 아래 주소에 먼저 접속해 인증을 완료한 후 다시 시도해주세요.",
+    noData: "데이터 없음", loading: "데이터 로딩 중...",
+  },
+  en: {
+    title: "Portfolio", sub: "PORTFOLIO DASHBOARD", update: "Updated",
+    totalNet: "Total Net Assets", stock: "Stocks", deposit: "Cash",
+    noPrevDay: "— No previous data", timeline: "Balance Timeline",
+    assetWeight: "Asset Allocation", assetAlloc: "Allocation",
+    holdings: "Holdings",
+    colRank: "#", colName: "Name", colValue: "Value",
+    colQty: "Qty", colQtyChg: "Chg", colWeight: "Weight",
+    colPriceChg: "Price Chg", colAsset: "Type",
+    errTitle: "⚠ Failed to load data", errMsg: "Authentication required or server error.",
+    errGuide: "Please visit the URL below to complete authentication first.",
+    noData: "No data", loading: "Loading...",
+  },
+};
+const COLORS = ["var(--a1)", "var(--a2)", "var(--a4)", "var(--a3)"];
+
+// ── 숫자 포맷 ────────────────────────────────────────────────────
+const fmt = (n) => Math.round(n).toLocaleString("ko-KR");
+const fmtM = (n) => {
+  if (n >= 1e8) return (n / 1e8).toFixed(1) + "억";
+  if (n >= 1e4) return Math.round(n / 1e4) + "만";
+  return fmt(n);
+};
+
+const getAssetType = (name) => {
+  const n = name.replace(/\s/g, "").toUpperCase();
+  if (["현금","달러","USD","머니마켓","CD금리","KOFR","예수금","현금성"].some(x => n.includes(x))) return "현금";
+  if (["금현물","은선물","GOLD","SILVER","원유","구리","원자재"].some(x => n.includes(x))) return "원자재";
+  if (["국채","채권","TIPS","BOND","30년"].some(x => n.includes(x))) return "채권";
+  return "주식";
+};
+
+const ASSET_COLORS = { "주식": "var(--a1)", "원자재": "var(--a3)", "현금": "var(--a2)", "채권": "var(--a4)" };
+const ASSET_ORDER = ["주식", "원자재", "현금", "채권"];
+
+// ── 커스텀 툴팁 ──────────────────────────────────────────────────
+function ChartTooltip({ active, payload, label, type }) {
+  if (!active || !payload?.length) return null;
+  return (
+    <div className="ct">
+      <div className="ct-date">{label}</div>
+      {payload.map((p, i) => (
+        <div className="ct-row" key={i}>
+          <span className="ct-lbl" style={{ color: p.color }}>{p.name}</span>
+          <span className="ct-val">
+            {type === "pct"
+              ? (p.value >= 0 ? "+" : "") + p.value.toFixed(2) + "%"
+              : fmt(p.value)}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ── 도넛 차트 (SVG) ───────────────────────────────────────────────
+function Donut({ data, total, label = "전체 순자산" }) {
+  const r = 44, cx = 60, cy = 60;
+  const circ = 2 * Math.PI * r;
+  let offset = 0;
+  const slices = data.map((d, i) => {
+    const pct = total > 0 ? d.value / total : 0;
+    const dash = pct * circ;
+    const color = d.color ?? COLORS[i % COLORS.length];
+    const slice = (
+      <circle key={i} cx={cx} cy={cy} r={r}
+        fill="none" stroke={color}
+        strokeWidth={14}
+        strokeDasharray={`${dash} ${circ - dash}`}
+        strokeDashoffset={-offset}
+        transform={`rotate(-90 ${cx} ${cy})`}
+        opacity={0.9}
+      />
+    );
+    offset += dash;
+    return slice;
+  });
+  return (
+    <svg width="120" height="120" viewBox="0 0 120 120">
+      <circle cx={cx} cy={cy} r={r} fill="none" stroke="var(--border)" strokeWidth={14} />
+      {slices}
+      <text x={cx} y={cy - 6} textAnchor="middle" fill="var(--text)"
+        fontSize="12" fontFamily="DM Mono" fontWeight="500">
+        {fmtM(total)}
+      </text>
+      <text x={cx} y={cy + 10} textAnchor="middle" fill="var(--text3)" fontSize="9" fontFamily="Noto Sans KR">
+        {label}
+      </text>
+    </svg>
+  );
+}
+
+// ── 메인 앱 ──────────────────────────────────────────────────────
+function App() {
+  const [data, setData] = React.useState(null);
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState(null);
+  const [period, setPeriod] = React.useState("1M");
+  const [lang, setLang] = React.useState("ko");
+  const t = I18N[lang];
+
+  React.useEffect(() => {
+    fetch(`${WORKER}/api/sheets`, { credentials: 'include' })
+      .then(r => r.text())
+      .then(t => JSON.parse(decodeURIComponent(escape(atob(t)))))
+      .then(d => {
+        if (d.error) throw new Error(d.error);
+        setData(d);
+      })
+      .catch(e => setError(e.message))
+      .finally(() => setLoading(false));
+  }, []);
+
+  if (loading) return (
+    <div className="loading-screen">
+      <div className="loading-ring" />
+      <div className="loading-text">LOADING PORTFOLIO...</div>
+    </div>
+  );
+
+  if (error) return (
+    <div className="app">
+      <div className="error-box">
+        <div style={{ marginBottom: 8, color: "var(--text2)" }}>{t.errTitle}</div>
+        <div style={{ marginTop: 8, color: "var(--text3)", fontSize: 11, lineHeight: 1.7 }}>
+          {t.errMsg}<br/>{t.errGuide}<br/>
+          <span style={{ color: "var(--a1)" }}>https://kis-proxy.yusunghwan.workers.dev/api/sheets</span>
+        </div>
+      </div>
+    </div>
+  );
+
+  const { timeline = [], latest } = data;
+  if (!latest) return <div className="app"><div className="error-box">{t.noData}</div></div>;
+
+  const { summary, holdings, date: latestDate } = latest;
+  const accounts = summary?.accounts ?? [];
+  const totalNet = summary?.totalNet ?? 0;
+  const totalDeposit = summary?.totalDeposit ?? 0;
+  const totalStock = summary?.totalStock ?? 0;
+
+  // 기간 필터
+  const periodFilter = (tl, p) => {
+    if (!tl.length) return tl;
+    const last = new Date(tl[tl.length - 1].date);
+    const cutMap = { "1W": 7, "1M": 30, "3M": 90, "6M": 180 };
+    const days = cutMap[p];
+    if (!days) return tl;
+    const cut = new Date(last); cut.setDate(cut.getDate() - days);
+    return tl.filter(t => new Date(t.date) >= cut);
+  };
+
+  const tlFiltered = periodFilter(timeline, period);
+  // 전일 대비
+  const hasPrevDay = timeline.length >= 2;
+  const prevNet = hasPrevDay ? timeline[timeline.length - 2]?.totalNet : totalNet;
+  const dayChg = totalNet - prevNet;
+  const dayPct = prevNet > 0 ? (dayChg / prevNet) * 100 : 0;
+
+  // 이전 날짜 종목 가격 맵 (직전 탭 데이터)
+  const prevHoldings = latest.prevHoldings ?? [];
+  const prevHoldMap = {};  // name → { price, qty }
+  prevHoldings.forEach(h => {
+    if (!prevHoldMap[h.name]) {
+      prevHoldMap[h.name] = { price: h.price > 0 ? h.price : 0, qty: h.qty ?? 0 };
+    } else {
+      prevHoldMap[h.name].qty += h.qty ?? 0; // 여러 계좌 합산
+    }
+  });
+
+  // 종목 집계 (계좌 합산)
+  const holdAgg = {};
+  holdings.forEach(h => {
+    const key = h.name;
+    if (!holdAgg[key]) holdAgg[key] = { name: h.name, value: 0, qty: 0, price: h.price, type: getAssetType(h.name) };
+    holdAgg[key].value += h.value;
+    holdAgg[key].qty += h.qty ?? 0;
+    if (h.price > 0) holdAgg[key].price = h.price;
+  });
+  const sortedHoldings = Object.values(holdAgg)
+    .sort((a, b) => b.value - a.value);
+  const maxHoldVal = sortedHoldings[0]?.value ?? 1;
+
+  // 자산군별 집계
+  const assetAgg = {};
+  sortedHoldings.forEach(h => {
+    if (!assetAgg[h.type]) assetAgg[h.type] = 0;
+    assetAgg[h.type] += h.value;
+  });
+  // 예수금도 현금에 포함
+  assetAgg["현금"] = (assetAgg["현금"] ?? 0) + totalDeposit;
+
+  const acctColors = COLORS;
+
+  return (
+    <div className="app">
+      {/* Header */}
+      <div className="hdr">
+        <div>
+          <div className="hdr-title">{t.title}</div>
+          <div className="hdr-sub">{t.sub}</div>
+        </div>
+        <div style={{display:"flex", flexDirection:"column", alignItems:"flex-end", gap:6}}>
+          <div className="hdr-badge">{t.update} <em>{latestDate}</em></div>
+          <div style={{display:"flex", gap:4}}>
+            {["ko","en"].map(l => (
+              <button key={l} onClick={() => setLang(l)} style={{
+                fontFamily:"var(--mono)", fontSize:10, padding:"2px 8px",
+                borderRadius:4, border:"1px solid var(--border2)", cursor:"pointer",
+                background: lang===l ? "var(--a1)" : "var(--s2)",
+                color: lang===l ? "#fff" : "var(--text3)",
+              }}>{l.toUpperCase()}</button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* KPI */}
+      <div className="kpi-row">
+        <div className="kpi total">
+          <div className="kpi-main-wrap">
+            <div>
+              <div className="kpi-lbl">{t.totalNet}</div>
+              <div className="kpi-val">{fmt(totalNet)}</div>
+              <div className="kpi-sub">{t.stock} {fmt(totalStock)} · {t.deposit} {fmt(totalDeposit)}</div>
+              {hasPrevDay
+                ? <div className={`kpi-chg ${dayChg >= 0 ? "up" : "dn"}`}>
+                    {dayChg >= 0 ? "▲" : "▼"} {dayChg >= 0 ? "+" : ""}{fmt(dayChg)} ({dayPct >= 0 ? "+" : ""}{dayPct.toFixed(2)}%)
+                  </div>
+                : <div className="kpi-chg neu">{t.noPrevDay}</div>
+              }
+            </div>
+            {/* 계좌 요약 */}
+            <div className="kpi-accts-wrap">
+              {accounts.map((a, i) => {
+                const pct = totalNet > 0 ? (a.net / totalNet * 100).toFixed(1) : "0.0";
+                const hasPrev = timeline.length >= 2;
+                const prev = hasPrev ? timeline[timeline.length-2]?.accounts?.[i]?.net ?? a.net : a.net;
+                const chg = a.net - prev;
+                const cpct = prev > 0 ? (chg / prev * 100) : 0;
+                return (
+                  <div key={i} style={{ textAlign: "right" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 5, justifyContent: "flex-end", marginBottom: 3 }}>
+                      <div style={{ width: 6, height: 6, borderRadius: "50%", background: acctColors[i % acctColors.length], flexShrink: 0 }} />
+                      <span style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--text3)" }}>{a.account}</span>
+                    </div>
+                    <div style={{ fontFamily: "var(--mono)", fontSize: 14, color: "var(--text)", letterSpacing: "-0.3px" }}>{fmtM(a.net)}</div>
+                    <div style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--text3)", marginTop: 2 }}>{pct}%</div>
+                    {hasPrev && <div style={{ fontFamily: "var(--mono)", fontSize: 10, marginTop: 1, color: chg >= 0 ? "var(--a2)" : "var(--danger)" }}>
+                      {chg >= 0 ? "▲" : "▼"} {Math.abs(cpct).toFixed(2)}%
+                    </div>}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+          {/* 비중 막대 */}
+          <div className="acct-strip" style={{ marginTop: 14 }}>
+            {accounts.map((a, i) => (
+              <div key={i} className="acct-seg"
+                style={{ flex: a.net, background: acctColors[i % acctColors.length] }} />
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Main grid */}
+      <div className="main-grid">
+        {/* Timeline */}
+        <div className="card">
+          <div className="card-hdr">
+            <div className="card-title">{t.timeline}</div>
+            <div className="ptabs">
+              {["1W","1M","3M","6M","ALL"].map(p => (
+                <button key={p} className={`ptab ${period === p ? "on" : ""}`}
+                  onClick={() => setPeriod(p)}>{p}</button>
+              ))}
+            </div>
+          </div>
+          {(() => {
+            const vals = tlFiltered.map(d => d.totalNet).filter(Boolean);
+            const minV = vals.length ? Math.min(...vals) : 0;
+            const maxV = vals.length ? Math.max(...vals) : 0;
+            const pad = (maxV - minV) * 0.15 || 1000000;
+            const yMin = Math.floor((minV - pad) / 1000000) * 1000000;
+            const yMax = Math.ceil((maxV + pad) / 1000000) * 1000000;
+            return (
+              <Recharts.ResponsiveContainer width="100%" height={210}>
+                <Recharts.AreaChart data={tlFiltered}
+                  margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="gTotal" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="var(--a1)" stopOpacity={0.3}/>
+                      <stop offset="100%" stopColor="var(--a1)" stopOpacity={0}/>
+                    </linearGradient>
+                  </defs>
+                  <Recharts.CartesianGrid stroke="var(--border)" strokeDasharray="0" vertical={false} />
+                  <Recharts.XAxis dataKey="date" tick={{ fill: "var(--text3)", fontSize: 9, fontFamily: "DM Mono" }}
+                    tickLine={false} axisLine={false}
+                    tickFormatter={d => d.slice(5)} interval="preserveStartEnd" />
+                  <Recharts.YAxis tick={{ fill: "var(--text3)", fontSize: 9, fontFamily: "DM Mono" }}
+                    tickLine={false} axisLine={false} width={56}
+                    domain={[yMin, yMax]}
+                    tickFormatter={v => fmtM(v)} />
+                  <Recharts.Tooltip content={<ChartTooltip type="num" />} />
+                  <Recharts.Area type="monotone" dataKey="totalNet" name="전체"
+                    stroke="var(--a1)" strokeWidth={2}
+                    fill="url(#gTotal)" dot={false} activeDot={{ r: 4, fill: "var(--a1)" }} />
+                </Recharts.AreaChart>
+              </Recharts.ResponsiveContainer>
+            );
+          })()}
+        </div>
+
+        {/* Asset type breakdown */}
+        <div className="card">
+          <div className="card-hdr">
+            <div className="card-title">{t.assetWeight}</div>
+          </div>
+          <div className="acct-list">
+            {ASSET_ORDER.filter(t => assetAgg[t] > 0).map((type, i) => {
+              const val = assetAgg[type] ?? 0;
+              const pct = totalNet > 0 ? (val / totalNet) * 100 : 0;
+              return (
+                <div className="acct-item" key={type}>
+                  <div className="acct-dot" style={{ background: ASSET_COLORS[type] }} />
+                  <div className="acct-info">
+                    <div className="acct-name" style={{ color: "var(--text)" }}>{type}</div>
+                  </div>
+                  <div className="acct-right">
+                    <div className="acct-val">{fmtM(val)}</div>
+                    <div style={{ fontFamily:"var(--mono)", fontSize:11, color: ASSET_COLORS[type], marginTop:2, fontWeight:500 }}>{pct.toFixed(1)}%</div>
+                  </div>
+                  <div className="acct-bar-bg">
+                    <div className="acct-bar-fill"
+                      style={{ width: `${pct}%`, background: ASSET_COLORS[type] }} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <div className="divider" />
+          <div className="donut-wrap">
+            <Donut
+              data={ASSET_ORDER.filter(t => assetAgg[t] > 0).map(t => ({ value: assetAgg[t], color: ASSET_COLORS[t] }))}
+              total={totalNet}
+              label={t.assetAlloc}
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Bottom */}
+      <div className="bot-grid">
+        {/* Holdings */}
+        <div className="card">
+          <div className="card-hdr">
+            <div className="card-title">{t.holdings}</div>
+          </div>
+          <div style={{overflowX:"auto"}}><table className="htbl" style={{minWidth:520}}>
+            <thead>
+              <tr>
+                <th style={{width:32}}>{t.colRank}</th>
+                <th style={{textAlign:"left"}}>{t.colName}</th>
+                <th style={{width:110}}>{t.colValue}</th>
+                <th style={{width:80}}>{t.colQty}</th>
+                <th style={{width:72}}>{t.colQtyChg}</th>
+                <th style={{width:60}}>{t.colWeight}</th>
+                <th style={{width:72, whiteSpace:"nowrap"}}>{t.colPriceChg}</th>
+                <th style={{width:48}}>{t.colAsset}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sortedHoldings.map((h, i) => {
+                const pct = totalNet > 0 ? (h.value / totalNet) * 100 : 0;
+                const col = ASSET_COLORS[h.type] ?? "var(--a1)";
+                const prev = prevHoldMap[h.name];
+                const isNew = !prev;
+                const chgPct = prev && prev.price > 0
+                  ? ((h.price - prev.price) / prev.price) * 100
+                  : 0;
+                const qtyChg = prev ? h.qty - prev.qty : 0;
+                return (
+                  <tr key={i}>
+                    <td style={{ fontFamily:"var(--mono)", fontSize:11, color:"var(--text3)", textAlign:"center" }}>{i+1}</td>
+                    <td style={{textAlign:"left"}}>
+                      <div className="sname" style={{overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap"}}>
+                        {(() => { let b=0; let r=""; for(const c of h.name){ const s=new TextEncoder().encode(c).length; if(b+s>40) break; b+=s; r+=c; } return r; })()}
+                      </div>
+                    </td>
+                    <td style={{fontFamily:"var(--mono)", fontSize:11, textAlign:"right"}}>{fmt(h.value)}</td>
+                    <td style={{fontFamily:"var(--mono)", fontSize:11, textAlign:"right"}}>{h.qty.toLocaleString()}</td>
+                    <td style={{fontFamily:"var(--mono)", fontSize:11, textAlign:"right", whiteSpace:"nowrap",
+                      color: isNew ? "var(--a2)" : qtyChg > 0 ? "var(--a2)" : qtyChg < 0 ? "var(--danger)" : "var(--text3)"}}>
+                      {isNew ? "NEW" : qtyChg === 0 ? "—" : (qtyChg > 0 ? "▲+" : "▼-") + Math.abs(qtyChg).toLocaleString()}
+                    </td>
+                    <td style={{fontFamily:"var(--mono)", fontSize:11, textAlign:"right", color: col}}>{pct.toFixed(2)}%</td>
+                    <td style={{fontFamily:"var(--mono)", fontSize:11, textAlign:"right", whiteSpace:"nowrap",
+                      color: isNew ? "var(--text3)" : chgPct > 0 ? "var(--a2)" : chgPct < 0 ? "var(--danger)" : "var(--text3)"}}>
+                      {isNew ? "—" : (chgPct >= 0 ? "▲" : "▼") + (chgPct >= 0 ? "+" : "") + chgPct.toFixed(2) + "%"}
+                    </td>
+                    <td style={{textAlign:"center"}}>
+                      <span style={{
+                        fontFamily:"var(--mono)", fontSize:10,
+                        color: col,
+                        background: col.replace("var(", "rgba(").replace(")", ",0.12)"),
+                        padding:"2px 6px", borderRadius:4, whiteSpace:"nowrap"
+                      }}>{h.type}</span>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table></div>
+        </div>
+      </div>
+
+      <div style={{ textAlign: "center", marginTop: 28, fontFamily: "var(--mono)", fontSize: 10, color: "var(--text3)" }}>
+        나의_투자_대시보드 · {latestDate} 기준
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
