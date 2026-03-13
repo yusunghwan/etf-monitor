@@ -283,6 +283,7 @@ const I18N = {
     noPrevDay: "— 전일 데이터 없음", timeline: "전체 잔고 타임라인",
     assetWeight: "자산군별 비중", assetAlloc: "자산 배분",
     holdings: "보유 종목",
+    showKospi: "코스피", showSnp: "S&P500",
     colRank: "순위", colName: "종목명", colValue: "평가금액",
     colQty: "수량", colQtyChg: "증감", colWeight: "비중",
     colPriceChg: "가격 증감", colAsset: "자산군",
@@ -296,6 +297,7 @@ const I18N = {
     noPrevDay: "— No previous data", timeline: "Balance Timeline",
     assetWeight: "Asset Allocation", assetAlloc: "Allocation",
     holdings: "Holdings",
+    showKospi: "KOSPI", showSnp: "S&P500",
     colRank: "#", colName: "Name", colValue: "Value",
     colQty: "Qty", colQtyChg: "Chg", colWeight: "Weight",
     colPriceChg: "Price Chg", colAsset: "Type",
@@ -390,15 +392,22 @@ function App() {
   const [period, setPeriod] = React.useState("1M");
   const [lang, setLang] = React.useState("ko");
   const t = I18N[lang];
+  const [indexData, setIndexData] = React.useState(null);
+  const [showKospi, setShowKospi] = React.useState(true);
+  const [showSnp, setShowSnp] = React.useState(true);
 
   React.useEffect(() => {
-    fetch(`${WORKER}/api/sheets`, { credentials: 'include' })
+    const sheetsP = fetch(`${WORKER}/api/sheets`, { credentials: 'include' })
       .then(r => r.text())
       .then(t => JSON.parse(decodeURIComponent(escape(atob(t)))))
-      .then(d => {
-        if (d.error) throw new Error(d.error);
-        setData(d);
-      })
+      .then(d => { if (d.error) throw new Error(d.error); setData(d); });
+
+    const indexP = fetch(`${WORKER}/api/index`, { credentials: 'include' })
+      .then(r => r.json())
+      .then(d => setIndexData(d))
+      .catch(() => {}); // 지수 실패해도 포트폴리오는 표시
+
+    Promise.all([sheetsP, indexP])
       .catch(e => setError(e.message))
       .finally(() => setLoading(false));
   }, []);
@@ -562,27 +571,91 @@ function App() {
         <div className="card">
           <div className="card-hdr">
             <div className="card-title">{t.timeline}</div>
-            <div className="ptabs">
-              {["1W","1M","3M","6M","ALL"].map(p => (
-                <button key={p} className={`ptab ${period === p ? "on" : ""}`}
-                  onClick={() => setPeriod(p)}>{p}</button>
-              ))}
+            <div style={{display:"flex", gap:6, alignItems:"center", flexWrap:"wrap"}}>
+              {/* 지수 토글 버튼 */}
+              <button onClick={() => setShowKospi(v => !v)} style={{
+                fontFamily:"var(--mono)", fontSize:10, padding:"2px 8px",
+                borderRadius:4, border:"1px solid var(--border2)", cursor:"pointer",
+                background: showKospi ? "rgba(240,168,78,0.2)" : "var(--s2)",
+                color: showKospi ? "var(--a3)" : "var(--text3)",
+              }}>{t.showKospi}</button>
+              <button onClick={() => setShowSnp(v => !v)} style={{
+                fontFamily:"var(--mono)", fontSize:10, padding:"2px 8px",
+                borderRadius:4, border:"1px solid var(--border2)", cursor:"pointer",
+                background: showSnp ? "rgba(192,132,252,0.2)" : "var(--s2)",
+                color: showSnp ? "var(--a4)" : "var(--text3)",
+              }}>{t.showSnp}</button>
+              <div className="ptabs">
+                {["1W","1M","3M","6M","ALL"].map(p => (
+                  <button key={p} className={`ptab ${period === p ? "on" : ""}`}
+                    onClick={() => setPeriod(p)}>{p}</button>
+                ))}
+              </div>
             </div>
           </div>
           {(() => {
-            const vals = tlFiltered.map(d => d.totalNet).filter(Boolean);
-            const minV = vals.length ? Math.min(...vals) : 0;
-            const maxV = vals.length ? Math.max(...vals) : 0;
-            const pad = (maxV - minV) * 0.15 || 1000000;
-            const yMin = Math.floor((minV - pad) / 1000000) * 1000000;
-            const yMax = Math.ceil((maxV + pad) / 1000000) * 1000000;
+            // 포트폴리오 수익률 기준 변환
+            const baseNet = tlFiltered[0]?.totalNet ?? 1;
+            const chartData = tlFiltered.map(d => ({
+              date: d.date,
+              portfolio: baseNet > 0 ? parseFloat(((d.totalNet - baseNet) / baseNet * 100).toFixed(2)) : 0,
+            }));
+
+            // 지수 데이터를 같은 기간으로 필터 & 수익률 변환
+            const startDate = tlFiltered[0]?.date ?? "0000-00-00";
+            const endDate = tlFiltered[tlFiltered.length - 1]?.date ?? "9999-99-99";
+
+            // 지수 수익률 변환: 포트폴리오 시작일 기준 가장 가까운 날짜로 base 설정
+            // 날짜 불일치(공휴일/주말) 시 직전 영업일 값으로 채움
+            function indexToRet(candles) {
+              if (!candles?.length) return {};
+              // startDate 이전까지 포함해서 기준가 찾기
+              const sorted = [...candles].sort((a,b) => a.date.localeCompare(b.date));
+              const baseCandle = sorted.filter(c => c.date <= startDate).slice(-1)[0]
+                              ?? sorted.find(c => c.date >= startDate);
+              if (!baseCandle) return {};
+              const base = baseCandle.close;
+              // 날짜 → 수익률 맵 (전체 기간)
+              const rawMap = {};
+              sorted.forEach(c => { rawMap[c.date] = parseFloat(((c.close - base) / base * 100).toFixed(2)); });
+              // 포트폴리오 날짜에 맞게 매핑 (직전 영업일 값으로 채움)
+              const allDates = sorted.map(c => c.date);
+              const result = {};
+              chartData.forEach(d => {
+                if (rawMap[d.date] !== undefined) {
+                  result[d.date] = rawMap[d.date];
+                } else {
+                  // 가장 가까운 이전 날짜 찾기
+                  const prev = allDates.filter(dt => dt <= d.date).slice(-1)[0];
+                  if (prev) result[d.date] = rawMap[prev];
+                }
+              });
+              return result;
+            }
+
+            const kospiMap = showKospi ? indexToRet(indexData?.kospi) : {};
+            const snpMap   = showSnp   ? indexToRet(indexData?.snp)   : {};
+
+            const merged = chartData.map(d => ({
+              ...d,
+              ...(showKospi && kospiMap[d.date] !== undefined ? { kospi: kospiMap[d.date] } : {}),
+              ...(showSnp   && snpMap[d.date]   !== undefined ? { snp:   snpMap[d.date]   } : {}),
+            }));
+
+            const allVals = merged.flatMap(d => [d.portfolio, d.kospi, d.snp].filter(v => v !== undefined));
+            const minV = allVals.length ? Math.min(...allVals) : -5;
+            const maxV = allVals.length ? Math.max(...allVals) : 5;
+            const pad = (maxV - minV) * 0.2 || 2;
+            const yMin = parseFloat((minV - pad).toFixed(1));
+            const yMax = parseFloat((maxV + pad).toFixed(1));
+
             return (
-              <Recharts.ResponsiveContainer width="100%" height={210}>
-                <Recharts.AreaChart data={tlFiltered}
-                  margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
+              <Recharts.ResponsiveContainer width="100%" height={220}>
+                <Recharts.LineChart data={merged}
+                  margin={{ top: 5, right: 16, left: 0, bottom: 0 }}>
                   <defs>
                     <linearGradient id="gTotal" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="var(--a1)" stopOpacity={0.3}/>
+                      <stop offset="0%" stopColor="var(--a1)" stopOpacity={0.15}/>
                       <stop offset="100%" stopColor="var(--a1)" stopOpacity={0}/>
                     </linearGradient>
                   </defs>
@@ -591,17 +664,42 @@ function App() {
                     tickLine={false} axisLine={false}
                     tickFormatter={d => d.slice(5)} interval="preserveStartEnd" />
                   <Recharts.YAxis tick={{ fill: "var(--text3)", fontSize: 9, fontFamily: "DM Mono" }}
-                    tickLine={false} axisLine={false} width={56}
+                    tickLine={false} axisLine={false} width={44}
                     domain={[yMin, yMax]}
-                    tickFormatter={v => fmtM(v)} />
-                  <Recharts.Tooltip content={<ChartTooltip type="num" />} />
-                  <Recharts.Area type="monotone" dataKey="totalNet" name="전체"
-                    stroke="var(--a1)" strokeWidth={2}
-                    fill="url(#gTotal)" dot={false} activeDot={{ r: 4, fill: "var(--a1)" }} />
-                </Recharts.AreaChart>
+                    tickFormatter={v => (v >= 0 ? "+" : "") + v.toFixed(1) + "%"} />
+                  <Recharts.ReferenceLine y={0} stroke="var(--border2)" strokeDasharray="3 3" />
+                  <Recharts.Tooltip formatter={(v, name) => {
+                    const label = name === "portfolio" ? "포트폴리오" : name === "kospi" ? "코스피" : "S&P500";
+                    return [(v >= 0 ? "+" : "") + v.toFixed(2) + "%", label];
+                  }} contentStyle={{ background:"var(--s2)", border:"1px solid var(--border2)", borderRadius:8, fontSize:11 }}
+                  labelStyle={{ color:"var(--text3)", fontFamily:"DM Mono", fontSize:10 }} />
+                  <Recharts.Line type="monotone" dataKey="portfolio" name="portfolio"
+                    stroke="var(--a1)" strokeWidth={2} dot={false} activeDot={{ r: 4 }} />
+                  {showKospi && <Recharts.Line type="monotone" dataKey="kospi" name="kospi"
+                    stroke="var(--a3)" strokeWidth={1.5} dot={false} strokeDasharray="4 2"
+                    activeDot={{ r: 3 }} connectNulls={false} />}
+                  {showSnp && <Recharts.Line type="monotone" dataKey="snp" name="snp"
+                    stroke="var(--a4)" strokeWidth={1.5} dot={false} strokeDasharray="4 2"
+                    activeDot={{ r: 3 }} connectNulls={false} />}
+                </Recharts.LineChart>
               </Recharts.ResponsiveContainer>
             );
           })()}
+          {/* 범례 */}
+          <div style={{display:"flex", gap:14, marginTop:8, paddingLeft:4}}>
+            <div style={{display:"flex", alignItems:"center", gap:5}}>
+              <div style={{width:16, height:2, background:"var(--a1)", borderRadius:1}} />
+              <span style={{fontFamily:"var(--mono)", fontSize:10, color:"var(--text3)"}}>포트폴리오</span>
+            </div>
+            {showKospi && <div style={{display:"flex", alignItems:"center", gap:5}}>
+              <div style={{width:16, height:2, background:"var(--a3)", borderRadius:1, opacity:0.8}} />
+              <span style={{fontFamily:"var(--mono)", fontSize:10, color:"var(--text3)"}}>{t.showKospi}</span>
+            </div>}
+            {showSnp && <div style={{display:"flex", alignItems:"center", gap:5}}>
+              <div style={{width:16, height:2, background:"var(--a4)", borderRadius:1, opacity:0.8}} />
+              <span style={{fontFamily:"var(--mono)", fontSize:10, color:"var(--text3)"}}>{t.showSnp}</span>
+            </div>}
+          </div>
         </div>
 
         {/* Asset type breakdown */}
