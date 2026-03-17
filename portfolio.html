@@ -16,22 +16,36 @@
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 <style>
   :root {
-    --bg: #0b0d11;
-    --s1: #13161e;
-    --s2: #191d28;
-    --border: #222638;
-    --border2: #2d3348;
-    --a1: #4f8ef7;
-    --a2: #52e0a0;
-    --a3: #f0a84e;
-    --a4: #c084fc;
-    --danger: #f47070;
-    --text: #dde3f0;
-    --text2: #9aa5c0;
-    --text3: #6b7899;
     --mono: 'DM Mono', monospace;
     --sans: 'Noto Sans KR', sans-serif;
   }
+  /* ── 테마 ──────────────────────────────────────────────────── */
+  [data-theme="dark"], :root {
+    --bg: #0b0d11; --s1: #13161e; --s2: #191d28;
+    --border: #222638; --border2: #2d3348;
+    --a1: #4f8ef7; --a2: #52e0a0; --a3: #f0a84e; --a4: #c084fc;
+    --danger: #f47070;
+    --text: #dde3f0; --text2: #9aa5c0; --text3: #6b7899;
+  }
+  [data-theme="light"] {
+    --bg: #f0f2f7; --s1: #ffffff; --s2: #e8eaf2;
+    --border: #d4d8e8; --border2: #c0c6d8;
+    --a1: #2563eb; --a2: #059669; --a3: #d97706; --a4: #7c3aed;
+    --danger: #dc2626;
+    --text: #1e2340; --text2: #4b5280; --text3: #8b92b0;
+  }
+
+
+
+  [data-theme="rose"] {
+    --bg: #fdf4f5; --s1: #ffffff; --s2: #fce8ea;
+    --border: #f2d0d4; --border2: #e8b8be;
+    --a1: #c0415a; --a2: #2d9e6b; --a3: #c07a20; --a4: #8040c0;
+    --danger: #c02020;
+    --text: #2a1218; --text2: #7a4050; --text3: #b08090;
+  }
+
+
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { height: 100%; }
   body {
@@ -280,13 +294,13 @@ const I18N = {
   ko: {
     title: "포트폴리오", sub: "PORTFOLIO DASHBOARD", update: "업데이트",
     totalNet: "전체 순자산", stock: "주식", deposit: "예수금",
-    noPrevDay: "— 전일 데이터 없음", timeline: "전체 잔고 타임라인",
+    noPrevDay: "— 전일 데이터 없음", timeline: "수익률 타임라인",
     assetWeight: "자산군별 비중", assetAlloc: "자산 배분",
     holdings: "보유 종목",
     showKospi: "코스피", showSnp: "S&P500",
     colRank: "순위", colName: "종목명", colValue: "평가금액",
-    colQty: "수량", colQtyChg: "증감", colWeight: "비중",
-    colPriceChg: "가격 증감", colAsset: "자산군",
+    colQty: "수량", colQtyChg: "수량▲", colWeight: "비중", colCurPrice: "현재가",
+    colPriceChg: "현재가▲", colAsset: "자산군",
     errTitle: "⚠ 데이터 로드 실패", errMsg: "인증이 필요하거나 서버에 일시적인 문제가 발생했습니다.",
     errGuide: "브라우저에서 아래 주소에 먼저 접속해 인증을 완료한 후 다시 시도해주세요.",
     noData: "데이터 없음", loading: "데이터 로딩 중...",
@@ -294,13 +308,13 @@ const I18N = {
   en: {
     title: "Portfolio", sub: "PORTFOLIO DASHBOARD", update: "Updated",
     totalNet: "Total Net Assets", stock: "Stocks", deposit: "Cash",
-    noPrevDay: "— No previous data", timeline: "Balance Timeline",
+    noPrevDay: "— No previous data", timeline: "Return Timeline",
     assetWeight: "Asset Allocation", assetAlloc: "Allocation",
     holdings: "Holdings",
     showKospi: "KOSPI", showSnp: "S&P500",
     colRank: "#", colName: "Name", colValue: "Value",
-    colQty: "Qty", colQtyChg: "Chg", colWeight: "Weight",
-    colPriceChg: "Price Chg", colAsset: "Type",
+    colQty: "Qty", colQtyChg: "Qty▲", colWeight: "Weight", colCurPrice: "Price",
+    colPriceChg: "Price▲", colAsset: "Type",
     errTitle: "⚠ Failed to load data", errMsg: "Authentication required or server error.",
     errGuide: "Please visit the URL below to complete authentication first.",
     noData: "No data", loading: "Loading...",
@@ -392,6 +406,13 @@ function App() {
   const [period, setPeriod] = React.useState("1M");
   const [lang, setLang] = React.useState("ko");
   const t = I18N[lang];
+  const [theme, setTheme] = React.useState(() => localStorage.getItem("pf-theme") ?? "dark");
+  const [showSettings, setShowSettings] = React.useState(false);
+
+  React.useEffect(() => {
+    document.documentElement.setAttribute("data-theme", theme);
+    localStorage.setItem("pf-theme", theme);
+  }, [theme]);
   const [indexData, setIndexData] = React.useState(null);
   const [showKospi, setShowKospi] = React.useState(true);
   const [showSnp, setShowSnp] = React.useState(true);
@@ -434,11 +455,14 @@ function App() {
   const { timeline = [], latest } = data;
   if (!latest) return <div className="app"><div className="error-box">{t.noData}</div></div>;
 
-  const { summary, holdings, date: latestDate } = latest;
+  const { summary, holdings, date: latestDate, realtimeUpdated } = latest;
   const accounts = summary?.accounts ?? [];
   const totalNet = summary?.totalNet ?? 0;
   const totalDeposit = summary?.totalDeposit ?? 0;
   const totalStock = summary?.totalStock ?? 0;
+  const totalPrincipal = summary?.totalPrincipal ?? 0;
+  const totalProfit = totalPrincipal > 0 ? totalNet - totalPrincipal : null;
+  const totalProfitPct = totalPrincipal > 0 ? ((totalNet - totalPrincipal) / totalPrincipal * 100) : null;
 
   // 기간 필터
   const periodFilter = (tl, p) => {
@@ -451,21 +475,43 @@ function App() {
     return tl.filter(t => new Date(t.date) >= cut);
   };
 
-  const tlFiltered = periodFilter(timeline, period);
+  // 실시간 업데이트된 경우 오늘 날짜 포인트를 타임라인 끝에 추가
+  const today = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Seoul" }); // YYYY-MM-DD
+  const timelineWithRT = (realtimeUpdated && latestDate !== today)
+    ? [...timeline, {
+        date: today,
+        totalNet,
+        totalDeposit: summary?.totalDeposit ?? 0,
+        totalStock: summary?.totalStock ?? 0,
+        totalPrincipal: summary?.totalPrincipal ?? 0,
+        accounts: summary?.accounts ?? [],
+        isRealtime: true,
+      }]
+    : timeline;
+  const tlFiltered = periodFilter(timelineWithRT, period);
   // 전일 대비
   const hasPrevDay = timeline.length >= 2;
   const prevNet = hasPrevDay ? timeline[timeline.length - 2]?.totalNet : totalNet;
   const dayChg = totalNet - prevNet;
   const dayPct = prevNet > 0 ? (dayChg / prevNet) * 100 : 0;
 
+  // 선택 기간 첫날 대비 손익
+  const periodFirstNet = tlFiltered.length > 0 ? tlFiltered[0].totalNet : totalNet;
+  const periodChg = totalNet - periodFirstNet;
+  const periodPct = periodFirstNet > 0 ? (periodChg / periodFirstNet) * 100 : 0;
+  const periodLabel = period === "ALL" ? "전체" : period;
+
   // 이전 날짜 종목 가격 맵 (직전 탭 데이터)
-  const prevHoldings = latest.prevHoldings ?? [];
+  const periodHoldings = latest.periodHoldings ?? {};
+  const baseHoldings = (periodHoldings[period]?.length > 0 ? periodHoldings[period] : null)
+    ?? (periodHoldings["prev"]?.length > 0 ? periodHoldings["prev"] : null)
+    ?? [];
   const prevHoldMap = {};  // name → { price, qty }
-  prevHoldings.forEach(h => {
+  baseHoldings.forEach(h => {
     if (!prevHoldMap[h.name]) {
       prevHoldMap[h.name] = { price: h.price > 0 ? h.price : 0, qty: h.qty ?? 0 };
     } else {
-      prevHoldMap[h.name].qty += h.qty ?? 0; // 여러 계좌 합산
+      prevHoldMap[h.name].qty += h.qty ?? 0;
     }
   });
 
@@ -478,13 +524,13 @@ function App() {
     holdAgg[key].qty += h.qty ?? 0;
     if (h.price > 0) holdAgg[key].price = h.price;
   });
-  const sortedHoldings = Object.values(holdAgg)
-    .sort((a, b) => b.value - a.value);
+  const allHoldings = Object.values(holdAgg).sort((a, b) => b.value - a.value);
+  const sortedHoldings = allHoldings.filter(h => !h.name.includes("현금성자산"));
   const maxHoldVal = sortedHoldings[0]?.value ?? 1;
 
-  // 자산군별 집계
+  // 자산군별 집계 (현금 포함 전체 기준)
   const assetAgg = {};
-  sortedHoldings.forEach(h => {
+  allHoldings.forEach(h => {
     if (!assetAgg[h.type]) assetAgg[h.type] = 0;
     assetAgg[h.type] += h.value;
   });
@@ -502,7 +548,20 @@ function App() {
           <div className="hdr-sub">{t.sub}</div>
         </div>
         <div style={{display:"flex", flexDirection:"column", alignItems:"flex-end", gap:6}}>
-          <div className="hdr-badge">{t.update} <em>{latestDate}</em></div>
+          <div style={{display:"flex", alignItems:"center", gap:8}}>
+            <div className="hdr-badge">
+              {t.update} <em>{latestDate}</em>
+              {realtimeUpdated && <span style={{marginLeft:6, fontFamily:"var(--mono)", fontSize:9,
+                background:"rgba(82,224,160,0.15)", color:"var(--a2)",
+                padding:"1px 6px", borderRadius:4}}>LIVE</span>}
+            </div>
+            <button onClick={() => setShowSettings(v => !v)} style={{
+              fontFamily:"var(--mono)", fontSize:13, padding:"4px 8px",
+              borderRadius:6, border:"1px solid var(--border2)", cursor:"pointer",
+              background: showSettings ? "var(--a1)" : "var(--s2)",
+              color: showSettings ? "#fff" : "var(--text3)", lineHeight:1,
+            }}>⚙</button>
+          </div>
           <div style={{display:"flex", gap:4}}>
             {["ko","en"].map(l => (
               <button key={l} onClick={() => setLang(l)} style={{
@@ -516,6 +575,43 @@ function App() {
         </div>
       </div>
 
+      {/* 설정 패널 */}
+      {showSettings && (
+        <div style={{
+          background:"var(--s1)", border:"1px solid var(--border2)",
+          borderRadius:12, padding:"16px 20px", marginBottom:12,
+          animation:"fadeUp 0.2s ease both",
+        }}>
+          <div style={{fontSize:11, color:"var(--text3)", letterSpacing:"0.5px", textTransform:"uppercase", marginBottom:12}}>
+            {lang==="ko" ? "테마" : "Theme"}
+          </div>
+          <div style={{display:"flex", gap:8, flexWrap:"wrap"}}>
+            {[
+              { id:"dark",  label:"Dark",  bg:"#0b0d11", accent:"#4f8ef7" },
+              { id:"light", label:"Light", bg:"#f0f2f7", accent:"#2563eb" },
+              { id:"rose",  label:"Rose",  bg:"#fdf4f5", accent:"#c0415a" },
+            ].map(th => (
+              <button key={th.id} onClick={() => setTheme(th.id)} style={{
+                display:"flex", flexDirection:"column", alignItems:"center", gap:6,
+                padding:"10px 14px", borderRadius:8, cursor:"pointer",
+                border: theme===th.id ? `2px solid ${th.accent}` : "2px solid var(--border2)",
+                background: theme===th.id ? `${th.accent}22` : "var(--s2)",
+              }}>
+                <div style={{
+                  width:36, height:24, borderRadius:4,
+                  background:th.bg, border:"1px solid #ffffff22",
+                  position:"relative", overflow:"hidden",
+                }}>
+                  <div style={{position:"absolute", bottom:4, left:4, right:4, height:3, background:th.accent, borderRadius:2}} />
+                </div>
+                <span style={{fontFamily:"var(--mono)", fontSize:10,
+                  color: theme===th.id ? th.accent : "var(--text3)"}}>{th.label}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* KPI */}
       <div className="kpi-row">
         <div className="kpi total">
@@ -524,21 +620,21 @@ function App() {
               <div className="kpi-lbl">{t.totalNet}</div>
               <div className="kpi-val">{fmt(totalNet)}</div>
               <div className="kpi-sub">{t.stock} {fmt(totalStock)} · {t.deposit} {fmt(totalDeposit)}</div>
-              {hasPrevDay
-                ? <div className={`kpi-chg ${dayChg >= 0 ? "up" : "dn"}`}>
-                    {dayChg >= 0 ? "▲" : "▼"} {dayChg >= 0 ? "+" : ""}{fmt(dayChg)} ({dayPct >= 0 ? "+" : ""}{dayPct.toFixed(2)}%)
-                  </div>
-                : <div className="kpi-chg neu">{t.noPrevDay}</div>
-              }
+              {tlFiltered.length > 1 && (
+                <div className={`kpi-chg ${periodChg >= 0 ? "up" : "dn"}`}>
+                  {periodChg >= 0 ? "▲ +" : "▼ "}{fmt(Math.abs(periodChg))} ({periodPct >= 0 ? "+" : ""}{periodPct.toFixed(2)}%)
+                </div>
+              )}
             </div>
             {/* 계좌 요약 */}
             <div className="kpi-accts-wrap">
               {accounts.map((a, i) => {
-                const pct = totalNet > 0 ? (a.net / totalNet * 100).toFixed(1) : "0.0";
-                const hasPrev = timeline.length >= 2;
-                const prev = hasPrev ? timeline[timeline.length-2]?.accounts?.[i]?.net ?? a.net : a.net;
-                const chg = a.net - prev;
-                const cpct = prev > 0 ? (chg / prev * 100) : 0;
+                const weightPct = totalNet > 0 ? (a.net / totalNet * 100).toFixed(1) : "0.0";
+                // 기간 첫날 대비 변화율
+                const firstAcct = tlFiltered[0]?.accounts?.[i];
+                const firstNet = firstAcct?.net ?? a.net;
+                const acctChg = a.net - firstNet;
+                const acctPct = firstNet > 0 ? (acctChg / firstNet * 100) : null;
                 return (
                   <div key={i} style={{ textAlign: "right" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 5, justifyContent: "flex-end", marginBottom: 3 }}>
@@ -546,10 +642,13 @@ function App() {
                       <span style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--text3)" }}>{a.account}</span>
                     </div>
                     <div style={{ fontFamily: "var(--mono)", fontSize: 14, color: "var(--text)", letterSpacing: "-0.3px" }}>{fmtM(a.net)}</div>
-                    <div style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--text3)", marginTop: 2 }}>{pct}%</div>
-                    {hasPrev && <div style={{ fontFamily: "var(--mono)", fontSize: 10, marginTop: 1, color: chg >= 0 ? "var(--a2)" : "var(--danger)" }}>
-                      {chg >= 0 ? "▲" : "▼"} {Math.abs(cpct).toFixed(2)}%
-                    </div>}
+
+                    {acctPct !== null && tlFiltered.length > 1 && (
+                      <div style={{ fontFamily: "var(--mono)", fontSize: 10, marginTop: 1,
+                        color: acctPct >= 0 ? "var(--a2)" : "var(--danger)" }}>
+                        {acctPct >= 0 ? "▲" : "▼"} {Math.abs(acctPct).toFixed(2)}%
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -594,11 +693,16 @@ function App() {
             </div>
           </div>
           {(() => {
-            // 포트폴리오 수익률 기준 변환
-            const baseNet = tlFiltered[0]?.totalNet ?? 1;
+            // 기간 첫날 수익률을 0 기준으로 상대 변화 표시
+            const firstPrincipal = tlFiltered[0]?.totalPrincipal ?? 0;
+            const firstRet = firstPrincipal > 0
+              ? (tlFiltered[0].totalNet - firstPrincipal) / firstPrincipal * 100
+              : 0;
             const chartData = tlFiltered.map(d => ({
               date: d.date,
-              portfolio: baseNet > 0 ? parseFloat(((d.totalNet - baseNet) / baseNet * 100).toFixed(2)) : 0,
+              portfolio: d.totalPrincipal > 0
+                ? parseFloat(((d.totalNet - d.totalPrincipal) / d.totalPrincipal * 100 - firstRet).toFixed(2))
+                : 0,
             }));
 
             // 지수 데이터를 같은 기간으로 필터 & 수익률 변환
@@ -608,38 +712,39 @@ function App() {
             // 지수 수익률 변환: 포트폴리오 시작일 기준 가장 가까운 날짜로 base 설정
             // 날짜 불일치(공휴일/주말) 시 직전 영업일 값으로 채움
             function indexToRet(candles) {
-              if (!candles?.length) return {};
-              // startDate 이전까지 포함해서 기준가 찾기
+              if (!candles?.length) return { ret: {}, raw: {} };
               const sorted = [...candles].sort((a,b) => a.date.localeCompare(b.date));
               const baseCandle = sorted.filter(c => c.date <= startDate).slice(-1)[0]
                               ?? sorted.find(c => c.date >= startDate);
-              if (!baseCandle) return {};
+              if (!baseCandle) return { ret: {}, raw: {} };
               const base = baseCandle.close;
-              // 날짜 → 수익률 맵 (전체 기간)
-              const rawMap = {};
-              sorted.forEach(c => { rawMap[c.date] = parseFloat(((c.close - base) / base * 100).toFixed(2)); });
-              // 포트폴리오 날짜에 맞게 매핑 (직전 영업일 값으로 채움)
-              const allDates = sorted.map(c => c.date);
-              const result = {};
-              chartData.forEach(d => {
-                if (rawMap[d.date] !== undefined) {
-                  result[d.date] = rawMap[d.date];
-                } else {
-                  // 가장 가까운 이전 날짜 찾기
-                  const prev = allDates.filter(dt => dt <= d.date).slice(-1)[0];
-                  if (prev) result[d.date] = rawMap[prev];
-                }
+              const rawMap = {}, closeMap = {};
+              sorted.forEach(c => {
+                rawMap[c.date] = parseFloat(((c.close - base) / base * 100).toFixed(2));
+                closeMap[c.date] = c.close;
               });
-              return result;
+              const allDates = sorted.map(c => c.date);
+              const ret = {}, raw = {};
+              chartData.forEach(d => {
+                const date = rawMap[d.date] !== undefined ? d.date
+                  : allDates.filter(dt => dt <= d.date).slice(-1)[0];
+                if (date) { ret[d.date] = rawMap[date]; raw[d.date] = closeMap[date]; }
+              });
+              return { ret, raw };
             }
 
-            const kospiMap = showKospi ? indexToRet(indexData?.kospi) : {};
-            const snpMap   = showSnp   ? indexToRet(indexData?.snp)   : {};
+            const kospiResult = showKospi ? indexToRet(indexData?.kospi) : { ret:{}, raw:{} };
+            const snpResult   = showSnp   ? indexToRet(indexData?.snp)   : { ret:{}, raw:{} };
+
+            // tlFiltered에서 날짜별 totalNet 맵
+            const netMap = {};
+            tlFiltered.forEach(d => { netMap[d.date] = d.totalNet; });
 
             const merged = chartData.map(d => ({
               ...d,
-              ...(showKospi && kospiMap[d.date] !== undefined ? { kospi: kospiMap[d.date] } : {}),
-              ...(showSnp   && snpMap[d.date]   !== undefined ? { snp:   snpMap[d.date]   } : {}),
+              totalNet: netMap[d.date] ?? null,
+              ...(showKospi && kospiResult.ret[d.date] !== undefined ? { kospi: kospiResult.ret[d.date], kospiRaw: kospiResult.raw[d.date] } : {}),
+              ...(showSnp   && snpResult.ret[d.date]   !== undefined ? { snp:   snpResult.ret[d.date],   snpRaw:   snpResult.raw[d.date]   } : {}),
             }));
 
             const allVals = merged.flatMap(d => [d.portfolio, d.kospi, d.snp].filter(v => v !== undefined));
@@ -668,11 +773,33 @@ function App() {
                     domain={[yMin, yMax]}
                     tickFormatter={v => (v >= 0 ? "+" : "") + v.toFixed(1) + "%"} />
                   <Recharts.ReferenceLine y={0} stroke="var(--border2)" strokeDasharray="3 3" />
-                  <Recharts.Tooltip formatter={(v, name) => {
-                    const label = name === "portfolio" ? "포트폴리오" : name === "kospi" ? "코스피" : "S&P500";
-                    return [(v >= 0 ? "+" : "") + v.toFixed(2) + "%", label];
-                  }} contentStyle={{ background:"var(--s2)", border:"1px solid var(--border2)", borderRadius:8, fontSize:11 }}
-                  labelStyle={{ color:"var(--text3)", fontFamily:"DM Mono", fontSize:10 }} />
+                  <Recharts.Tooltip content={({ active, payload, label }) => {
+                    if (!active || !payload?.length) return null;
+                    const net = payload[0]?.payload?.totalNet;
+                    return (
+                      <div style={{ background:"var(--s2)", border:"1px solid var(--border2)", borderRadius:8, padding:"8px 12px", fontSize:11 }}>
+                        <div style={{ fontFamily:"var(--mono)", fontSize:10, color:"var(--text3)", marginBottom:6 }}>{label}</div>
+
+                        {payload.map((p, i) => {
+                          const name = p.dataKey === "portfolio" ? "포트폴리오" : p.dataKey === "kospi" ? "코스피" : "S&P500";
+                          const v = p.value;
+                          const netVal = p.payload?.totalNet;
+                          const rawVal = p.dataKey === "kospi" ? p.payload?.kospiRaw
+                            : p.dataKey === "snp" ? p.payload?.snpRaw : null;
+                          const displayVal = p.dataKey === "portfolio" && netVal != null
+                            ? fmtM(netVal) + " (" + (v >= 0 ? "+" : "") + v.toFixed(2) + "%)"
+                            : rawVal != null
+                            ? rawVal.toLocaleString() + " (" + (v >= 0 ? "+" : "") + v.toFixed(2) + "%)"
+                            : (v >= 0 ? "+" : "") + v.toFixed(2) + "%";
+                          return (
+                            <div key={i} style={{ fontFamily:"var(--mono)", color: p.stroke, marginTop:2 }}>
+                              {name} {displayVal}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  }} />
                   <Recharts.Line type="monotone" dataKey="portfolio" name="portfolio"
                     stroke="var(--a1)" strokeWidth={2} dot={false} activeDot={{ r: 4 }} />
                   {showKospi && <Recharts.Line type="monotone" dataKey="kospi" name="kospi"
@@ -756,6 +883,7 @@ function App() {
                 <th style={{width:80}}>{t.colQty}</th>
                 <th style={{width:72}}>{t.colQtyChg}</th>
                 <th style={{width:60}}>{t.colWeight}</th>
+                <th style={{width:80}}>{t.colCurPrice}</th>
                 <th style={{width:72, whiteSpace:"nowrap"}}>{t.colPriceChg}</th>
                 <th style={{width:48}}>{t.colAsset}</th>
               </tr>
@@ -770,6 +898,7 @@ function App() {
                   ? ((h.price - prev.price) / prev.price) * 100
                   : 0;
                 const qtyChg = prev ? h.qty - prev.qty : 0;
+                const isCash = h.name.includes("현금성자산") || h.name.includes("머니마켓") || h.name.includes("MMF");
                 return (
                   <tr key={i}>
                     <td style={{ fontFamily:"var(--mono)", fontSize:11, color:"var(--text3)", textAlign:"center" }}>{i+1}</td>
@@ -779,12 +908,15 @@ function App() {
                       </div>
                     </td>
                     <td style={{fontFamily:"var(--mono)", fontSize:11, textAlign:"right"}}>{fmt(h.value)}</td>
-                    <td style={{fontFamily:"var(--mono)", fontSize:11, textAlign:"right"}}>{h.qty.toLocaleString()}</td>
+                    <td style={{fontFamily:"var(--mono)", fontSize:11, textAlign:"right", color:"var(--text3)"}}>
+                      {isCash ? "—" : h.qty.toLocaleString()}
+                    </td>
                     <td style={{fontFamily:"var(--mono)", fontSize:11, textAlign:"right", whiteSpace:"nowrap",
                       color: isNew ? "var(--a2)" : qtyChg > 0 ? "var(--a2)" : qtyChg < 0 ? "var(--danger)" : "var(--text3)"}}>
-                      {isNew ? "NEW" : qtyChg === 0 ? "—" : (qtyChg > 0 ? "▲+" : "▼-") + Math.abs(qtyChg).toLocaleString()}
+                      {isCash ? "—" : isNew ? "NEW" : qtyChg === 0 ? "—" : (qtyChg > 0 ? "▲+" : "▼-") + Math.abs(qtyChg).toLocaleString()}
                     </td>
                     <td style={{fontFamily:"var(--mono)", fontSize:11, textAlign:"right", color: col}}>{pct.toFixed(2)}%</td>
+                    <td style={{fontFamily:"var(--mono)", fontSize:11, textAlign:"right", color: h.realtimeUpdated ? "var(--text)" : "var(--text3)"}}>{h.price > 0 ? fmt(h.price) : "—"}</td>
                     <td style={{fontFamily:"var(--mono)", fontSize:11, textAlign:"right", whiteSpace:"nowrap",
                       color: isNew ? "var(--text3)" : chgPct > 0 ? "var(--a2)" : chgPct < 0 ? "var(--danger)" : "var(--text3)"}}>
                       {isNew ? "—" : (chgPct >= 0 ? "▲" : "▼") + (chgPct >= 0 ? "+" : "") + chgPct.toFixed(2) + "%"}
