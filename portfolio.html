@@ -461,8 +461,9 @@ function App() {
   const totalDeposit = summary?.totalDeposit ?? 0;
   const totalStock = summary?.totalStock ?? 0;
   const totalPrincipal = summary?.totalPrincipal ?? 0;
-  const totalProfit = totalPrincipal > 0 ? totalNet - totalPrincipal : null;
-  const totalProfitPct = totalPrincipal > 0 ? ((totalNet - totalPrincipal) / totalPrincipal * 100) : null;
+  // 시트에서 직접 읽은 수익 (있으면 우선 사용)
+  const totalProfit = summary?.totalProfit ?? (totalPrincipal > 0 ? totalNet - totalPrincipal : null);
+  const totalProfitPct = totalPrincipal > 0 ? ((totalProfit ?? 0) / totalPrincipal * 100) : null;
 
   // 기간 필터
   const periodFilter = (tl, p) => {
@@ -477,14 +478,21 @@ function App() {
 
   // 실시간 업데이트된 경우 오늘 날짜 포인트를 타임라인 끝에 추가
   const today = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Seoul" }); // YYYY-MM-DD
-  const timelineWithRT = (realtimeUpdated && latestDate !== today)
+  const todayMyIndex = summary?.totalMyIndex ?? 0;
+  // 주말(토=6, 일=0)에는 오늘 포인트 추가하지 않음
+  // KST 기준 요일 계산 (UTC 파싱 오류 방지)
+  const todayDow = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Seoul" })).getDay();
+  const isWeekend = todayDow === 0 || todayDow === 6;
+  const timelineWithRT = (realtimeUpdated && latestDate !== today && !isWeekend)
     ? [...timeline, {
         date: today,
         totalNet,
-        totalDeposit: summary?.totalDeposit ?? 0,
-        totalStock: summary?.totalStock ?? 0,
-        totalPrincipal: summary?.totalPrincipal ?? 0,
-        accounts: summary?.accounts ?? [],
+        totalDeposit:     summary?.totalDeposit ?? 0,
+        totalStock:       summary?.totalStock ?? 0,
+        totalPrincipal:   summary?.totalPrincipal ?? 0,
+        totalProfitSheet: summary?.totalProfit ?? null,
+        totalMyIndex:     todayMyIndex,
+        accounts:         summary?.accounts ?? [],
         isRealtime: true,
       }]
     : timeline;
@@ -495,17 +503,27 @@ function App() {
   const dayChg = totalNet - prevNet;
   const dayPct = prevNet > 0 ? (dayChg / prevNet) * 100 : 0;
 
-  // 선택 기간 첫날 대비 손익
-  const periodFirstNet = tlFiltered.length > 0 ? tlFiltered[0].totalNet : totalNet;
+  // 선택 기간 첫날 대비 변화
+  const periodFirst = tlFiltered.length > 0 ? tlFiltered[0] : null;
+  const periodFirstNet = periodFirst?.totalNet ?? totalNet;
+  const periodFirstProfit = periodFirst?.totalProfitSheet ?? null;
+  const totalProfitSheet = summary?.totalProfit ?? null;
+  const periodProfitChg = (totalProfitSheet !== null && periodFirstProfit !== null)
+    ? totalProfitSheet - periodFirstProfit : null;
   const periodChg = totalNet - periodFirstNet;
   const periodPct = periodFirstNet > 0 ? (periodChg / periodFirstNet) * 100 : 0;
   const periodLabel = period === "ALL" ? "전체" : period;
 
   // 이전 날짜 종목 가격 맵 (직전 탭 데이터)
   const periodHoldings = latest.periodHoldings ?? {};
-  const baseHoldings = (periodHoldings[period]?.length > 0 ? periodHoldings[period] : null)
+  const periodDates = latest.periodDates ?? {};
+  const hasCurrentPeriod = periodHoldings[period]?.length > 0;
+  const baseHoldings = (hasCurrentPeriod ? periodHoldings[period] : null)
     ?? (periodHoldings["prev"]?.length > 0 ? periodHoldings["prev"] : null)
     ?? [];
+  const baseLabel = hasCurrentPeriod
+    ? (periodDates[period] ?? period)
+    : (periodDates["prev"] ?? "전일");
   const prevHoldMap = {};  // name → { price, qty }
   baseHoldings.forEach(h => {
     if (!prevHoldMap[h.name]) {
@@ -550,7 +568,7 @@ function App() {
         <div style={{display:"flex", flexDirection:"column", alignItems:"flex-end", gap:6}}>
           <div style={{display:"flex", alignItems:"center", gap:8}}>
             <div className="hdr-badge">
-              {t.update} <em>{latestDate}</em>
+              {t.update} <em>{realtimeUpdated && !isWeekend ? today : latestDate}</em>
               {realtimeUpdated && <span style={{marginLeft:6, fontFamily:"var(--mono)", fontSize:9,
                 background:"rgba(82,224,160,0.15)", color:"var(--a2)",
                 padding:"1px 6px", borderRadius:4}}>LIVE</span>}
@@ -620,7 +638,15 @@ function App() {
               <div className="kpi-lbl">{t.totalNet}</div>
               <div className="kpi-val">{fmt(totalNet)}</div>
               <div className="kpi-sub">{t.stock} {fmt(totalStock)} · {t.deposit} {fmt(totalDeposit)}</div>
-              {tlFiltered.length > 1 && (
+              {tlFiltered.length > 1 && periodProfitChg !== null && (
+                <div className={`kpi-chg ${periodProfitChg >= 0 ? "up" : "dn"}`}>
+                  {periodProfitChg >= 0 ? "▲ +" : "▼ "}{fmt(Math.abs(periodProfitChg))}
+                  <span style={{color:"var(--text3)", marginLeft:6, fontSize:10}}>
+                    ({periodLabel} 수익 변화)
+                  </span>
+                </div>
+              )}
+              {tlFiltered.length > 1 && periodProfitChg === null && (
                 <div className={`kpi-chg ${periodChg >= 0 ? "up" : "dn"}`}>
                   {periodChg >= 0 ? "▲ +" : "▼ "}{fmt(Math.abs(periodChg))} ({periodPct >= 0 ? "+" : ""}{periodPct.toFixed(2)}%)
                 </div>
@@ -629,12 +655,14 @@ function App() {
             {/* 계좌 요약 */}
             <div className="kpi-accts-wrap">
               {accounts.map((a, i) => {
-                const weightPct = totalNet > 0 ? (a.net / totalNet * 100).toFixed(1) : "0.0";
-                // 기간 첫날 대비 변화율
-                const firstAcct = tlFiltered[0]?.accounts?.[i];
-                const firstNet = firstAcct?.net ?? a.net;
-                const acctChg = a.net - firstNet;
-                const acctPct = firstNet > 0 ? (acctChg / firstNet * 100) : null;
+                // 계좌번호로 매칭 (인덱스 순서 불일치 방지)
+                const firstAcct = tlFiltered[0]?.accounts?.find(fa => fa.account === a.account)
+                  ?? tlFiltered[0]?.accounts?.[i];
+                // 수익 변화 (시트 profit 기준)
+                const curProfit  = a.profit ?? null;
+                const firstProfit = firstAcct?.profit ?? null;
+                const profitChg = (curProfit !== null && firstProfit !== null)
+                  ? curProfit - firstProfit : null;
                 return (
                   <div key={i} style={{ textAlign: "right" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 5, justifyContent: "flex-end", marginBottom: 3 }}>
@@ -642,11 +670,10 @@ function App() {
                       <span style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--text3)" }}>{a.account}</span>
                     </div>
                     <div style={{ fontFamily: "var(--mono)", fontSize: 14, color: "var(--text)", letterSpacing: "-0.3px" }}>{fmtM(a.net)}</div>
-
-                    {acctPct !== null && tlFiltered.length > 1 && (
+                    {profitChg !== null && tlFiltered.length > 1 && (
                       <div style={{ fontFamily: "var(--mono)", fontSize: 10, marginTop: 1,
-                        color: acctPct >= 0 ? "var(--a2)" : "var(--danger)" }}>
-                        {acctPct >= 0 ? "▲" : "▼"} {Math.abs(acctPct).toFixed(2)}%
+                        color: profitChg >= 0 ? "var(--a2)" : "var(--danger)" }}>
+                        {profitChg >= 0 ? "▲" : "▼"} {fmtM(Math.abs(profitChg))}
                       </div>
                     )}
                   </div>
@@ -693,15 +720,12 @@ function App() {
             </div>
           </div>
           {(() => {
-            // 기간 첫날 수익률을 0 기준으로 상대 변화 표시
-            const firstPrincipal = tlFiltered[0]?.totalPrincipal ?? 0;
-            const firstRet = firstPrincipal > 0
-              ? (tlFiltered[0].totalNet - firstPrincipal) / firstPrincipal * 100
-              : 0;
+            // 나의 지수 기준으로 상대 변화 표시 (첫날 = 0)
+            const firstMyIndex = tlFiltered[0]?.totalMyIndex ?? 0;
             const chartData = tlFiltered.map(d => ({
               date: d.date,
-              portfolio: d.totalPrincipal > 0
-                ? parseFloat(((d.totalNet - d.totalPrincipal) / d.totalPrincipal * 100 - firstRet).toFixed(2))
+              portfolio: firstMyIndex > 0 && d.totalMyIndex > 0
+                ? parseFloat(((d.totalMyIndex - firstMyIndex) / firstMyIndex * 100).toFixed(2))
                 : 0,
             }));
 
@@ -736,12 +760,13 @@ function App() {
             const kospiResult = showKospi ? indexToRet(indexData?.kospi) : { ret:{}, raw:{} };
             const snpResult   = showSnp   ? indexToRet(indexData?.snp)   : { ret:{}, raw:{} };
 
-            // tlFiltered에서 날짜별 totalNet 맵
-            const netMap = {};
-            tlFiltered.forEach(d => { netMap[d.date] = d.totalNet; });
+            // tlFiltered에서 날짜별 나의지수 + totalNet 맵
+            const myIndexMap = {}, netMap = {};
+            tlFiltered.forEach(d => { myIndexMap[d.date] = d.totalMyIndex; netMap[d.date] = d.totalNet; });
 
             const merged = chartData.map(d => ({
               ...d,
+              totalMyIndex: myIndexMap[d.date] ?? null,
               totalNet: netMap[d.date] ?? null,
               ...(showKospi && kospiResult.ret[d.date] !== undefined ? { kospi: kospiResult.ret[d.date], kospiRaw: kospiResult.raw[d.date] } : {}),
               ...(showSnp   && snpResult.ret[d.date]   !== undefined ? { snp:   snpResult.ret[d.date],   snpRaw:   snpResult.raw[d.date]   } : {}),
@@ -786,8 +811,9 @@ function App() {
                           const netVal = p.payload?.totalNet;
                           const rawVal = p.dataKey === "kospi" ? p.payload?.kospiRaw
                             : p.dataKey === "snp" ? p.payload?.snpRaw : null;
-                          const displayVal = p.dataKey === "portfolio" && netVal != null
-                            ? fmtM(netVal) + " (" + (v >= 0 ? "+" : "") + v.toFixed(2) + "%)"
+                          const myIdx = p.payload?.totalMyIndex;
+                          const displayVal = p.dataKey === "portfolio" && myIdx != null
+                            ? myIdx.toLocaleString() + " (" + (v >= 0 ? "+" : "") + v.toFixed(2) + "%)"
                             : rawVal != null
                             ? rawVal.toLocaleString() + " (" + (v >= 0 ? "+" : "") + v.toFixed(2) + "%)"
                             : (v >= 0 ? "+" : "") + v.toFixed(2) + "%";
@@ -872,7 +898,13 @@ function App() {
         {/* Holdings */}
         <div className="card">
           <div className="card-hdr">
-            <div className="card-title">{t.holdings}</div>
+            <div style={{display:"flex", alignItems:"baseline", gap:8}}>
+              <div className="card-title">{t.holdings}</div>
+              <div style={{fontFamily:"var(--mono)", fontSize:10, color:"var(--text3)"}}>
+                vs {baseLabel.slice(5)}
+                {!hasCurrentPeriod && <span style={{color:"var(--danger)", marginLeft:4}}>({period} 데이터 없음)</span>}
+              </div>
+            </div>
           </div>
           <div style={{overflowX:"auto"}}><table className="htbl" style={{minWidth:520}}>
             <thead>
@@ -938,7 +970,7 @@ function App() {
       </div>
 
       <div style={{ textAlign: "center", marginTop: 28, fontFamily: "var(--mono)", fontSize: 10, color: "var(--text3)" }}>
-        나의_투자_대시보드 · {latestDate} 기준
+        나의_투자_대시보드 · {realtimeUpdated && !isWeekend ? today : latestDate} 기준
       </div>
     </div>
   );
